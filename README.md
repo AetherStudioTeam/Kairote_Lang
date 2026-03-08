@@ -1,22 +1,22 @@
 <div align="center">
 
-<svg width="200" height="60" viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg" style="cursor: pointer; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); translate: none; rotate: none; scale: none; transform: translate(0px, 0px);"><defs><linearGradient id="esharpGradient" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color: rgb(0, 212, 255); stop-opacity: 1;"></stop><stop offset="50%" style="stop-color: rgb(0, 153, 255); stop-opacity: 1;"></stop><stop offset="100%" style="stop-color: rgb(0, 102, 255); stop-opacity: 1;"></stop></linearGradient><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2" result="coloredBlur"></feGaussianBlur><feMerge><feMergeNode in="coloredBlur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter><filter id="hoverGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="hoverBlur"></feGaussianBlur><feColorMatrix in="hoverBlur" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -8" result="coloredHoverBlur"></feColorMatrix><feMerge><feMergeNode in="coloredHoverBlur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter></defs><rect x="5" y="15" width="90" height="30" rx="8" fill="#001122" opacity="0.3" style="transition: opacity 0.3s;"></rect><text x="15" y="38" font-family="'Google Sans', 'Segoe UI', sans-serif" font-size="30" font-weight="1000" fill="url(#esharpGradient)" filter="url(#glow)" style="transition: 0.3s;">E</text><g transform="translate(45, 12)" fill="#00D4FF" style="transition: 0.3s;"><rect x="0" y="8" width="25" height="3" rx="1"></rect><rect x="0" y="18" width="25" height="3" rx="1"></rect><rect x="5" y="3" width="3" height="25" rx="1"></rect><rect x="17" y="3" width="3" height="25" rx="1"></rect></g><g transform="translate(75, 15)" opacity="0.6" style="transition: opacity 0.3s;"><circle cx="5" cy="5" r="2" fill="#0099FF"></circle><circle cx="15" cy="25" r="1.5" fill="#0066FF"></circle><rect x="0" y="15" width="20" height="1" fill="#00D4FF" opacity="0.3"></rect></g><text x="100" y="30" font-family="'Google Sans', 'Segoe UI', sans-serif" font-size="14" font-weight="400" fill="#CCCCCC" letter-spacing="1" style="transition: 0.3s;">LANGUAGE</text><g transform="translate(100, 38)" style="transition: opacity 0.3s;"><text x="18" y="1.5" font-family="monospace" font-size="8" fill="#00FF88">BY AetherStudio</text></g><rect x="1" y="1" width="198" height="58" rx="10" fill="none" stroke="#003366" stroke-width="1" opacity="0.3" style="transition: 0.3s;"></rect></svg>
+<svg width="200" height="60" viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg" style="cursor: pointer; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); translate: none; rotate: none; scale: none; transform: translate(0px, 0px);"><text x="15" y="38" font-family="'Google Sans', 'Segoe UI', sans-serif" font-size="30" font-weight="1000" fill="url(#esharpGradient)" filter="url(#glow)" style="transition: 0.3s;">Kairote</text><text x="100" y="30" font-family="'Google Sans', 'Segoe UI', sans-serif" font-size="14" font-weight="400" fill="#CCCCCC" letter-spacing="1" style="transition: 0.3s;">LANGUAGE</text><g transform="translate(100, 38)" style="transition: opacity 0.3s;"><text x="18" y="1.5" font-family="monospace" font-size="8" fill="#00FF88">BY AetherStudio</text></g></svg>
 
-# **E# Programming Language**
+# **Kairote Programming Language**
 
 ### *下一代系统级编程语言 | 编译速度比你想的快亿点点*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Stars](https://img.shields.io/github/stars/AetherStudioTeam/E_Sharp_Lang?style=for-the-badge&logo=github&color=blue)](https://github.com/AetherStudioTeam/E_Sharp_Lang/stargazers)
-[![Forks](https://img.shields.io/github/forks/AetherStudioTeam/E_Sharp_Lang?style=for-the-badge&logo=github&color=orange)](https://github.com/AetherStudioTeam/E_Sharp_Lang/network/members)
-[![Issues](https://img.shields.io/github/issues/AetherStudioTeam/E_Sharp_Lang?style=for-the-badge&logo=github&color=red)](https://github.com/AetherStudioTeam/E_Sharp_Lang/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/AetherStudioTeam/E_Sharp_Lang?style=for-the-badge&logo=git&color=green)](https://github.com/AetherStudioTeam/E_Sharp_Lang/commits)
-[![Code Size](https://img.shields.io/github/languages/code-size/AetherStudioTeam/E_Sharp_Lang?style=for-the-badge&logo=github&color=purple)](https://github.com/AetherStudioTeam/E_Sharp_Lang)
+[![Stars](https://img.shields.io/github/stars/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=blue)](https://github.com/AetherStudioTeam/Kairote_Lang/stargazers)
+[![Forks](https://img.shields.io/github/forks/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=orange)](https://github.com/AetherStudioTeam/Kairote_Lang/network/members)
+[![Issues](https://img.shields.io/github/issues/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=red)](https://github.com/AetherStudioTeam/Kairote_Lang/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=git&color=green)](https://github.com/AetherStudioTeam/Kairote_Lang/commits)
+[![Code Size](https://img.shields.io/github/languages/code-size/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=purple)](https://github.com/AetherStudioTeam/Kairote_Lang)
 [![C](https://img.shields.io/badge/C-00599C?style=for-the-badge&logo=c&logoColor=white)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Made by Aether](https://img.shields.io/badge/Made%20by-Aether%20Studio-00d4aa?style=for-the-badge)](https://www.aetstudio.xyz)
 
-[官网](https://es.aetstudio.xyz/) | [文档](https://es.aetstudio.xyz/docs) | [讨论区](https://github.com/AetherStudioTeam/E_Sharp_Lang/discussions) | [提交问题](https://github.com/AetherStudioTeam/E_Sharp_Lang/issues/new/choose)
+[官网](https://es.aetstudio.xyz/) | [文档](https://es.aetstudio.xyz/docs) | [讨论区](https://github.com/AetherStudioTeam/Kairote_Lang/discussions) | [提交问题](https://github.com/AetherStudioTeam/Kairote_Lang/issues/new/choose)
 
 </div>
 
@@ -24,11 +24,11 @@
 
 ##概述
 
-**E#** 是一个由 **Aether Studio** 开发的现代系统级编程语言，专为追求极致性能与优雅语法的开发者而生。
+**Kairote** 是一个由 **Aether Studio** 开发的现代系统级编程语言，专为追求极致性能与优雅语法的开发者而生。
 
 > **我们的愿景**：打造一款兼具 C++ 性能(但目前仅在部分领域上赶超)、C# 优雅、Rust 安全(当前阶段尚未实现)的编程语言，让系统编程变得简单而强大。
 
-### 为什么选择 E#？
+### 为什么选择 Kairote？
 
 | 特性 | 描述 |
 |------|------|
@@ -43,7 +43,7 @@
 ## 预览
 
 ```csharp
-// E# 代码示例
+// Kairote 代码示例
 module HelloWorld;
 
 import System.Console;
@@ -52,10 +52,10 @@ public class Program
 {
     public static void Main(string[] args)
     {
-        // 多元运算符 - E# 独有特性
+        // 多元运算符 - Kairote 独有特性
         var result = a <> b <> c;  // 范围比较
         
-        Console.WriteLine($"Hello, E# World!");
+        Console.WriteLine($"Hello, Kairote World!");
     }
 }
 ```
@@ -74,8 +74,8 @@ public class Program
 
 ```bash
 # 克隆仓库
-git clone https://github.com/AetherStudioTeam/E_Sharp_Lang.git
-cd E_Sharp_Lang
+git clone https://github.com/AetherStudioTeam/Kairote_Lang.git
+cd Kairote_Lang
 
 # 安装依赖
 pip install -r requirements.txt
@@ -91,7 +91,7 @@ python build.py
 python build.py --release
 ```
 
-### 编写你的第一个 E# 程序 或 [学习文档](./docs/doc/README.md)
+### 编写你的第一个 Kairote 程序 或 [学习文档](./docs/doc/README.md)
 
 创建 `hello.es` 文件：
 
@@ -102,7 +102,7 @@ public class Program
 {
     public static void Main()
     {
-        System.Console.WriteLine("Hello, E#!");
+        System.Console.WriteLine("Hello, Kairote!");
     }
 }
 ```
@@ -120,7 +120,7 @@ public class Program
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        E# Toolchain                         │
+│                        Kairote Toolchain                    │
 ├─────────────┬─────────────┬─────────────┬───────────────────┤
 │   ESC       │   ArkLink   │    LSP      │   Runtime         │
 │  编译器      │   链接器     │  语言服务    │   运行时           │
@@ -136,7 +136,7 @@ public class Program
 ### 项目结构
 
 ```
-E_Sharp_Lang/
+Kairote_Lang/
 ├── ESC/                    # 编译器核心
 │   ├── src/
 │   │   ├── compiler/       # 编译器前端、中端、后端
@@ -213,9 +213,9 @@ E_Sharp_Lang/
 
 [查看贡献指南](./DevStand.md)
 
-[提交 Bug 报告](https://github.com/AetherStudioTeam/E_Sharp_Lang/issues/new?template=bug_report.md)
+[提交 Bug 报告](https://github.com/AetherStudioTeam/Kairote_Lang/issues/new?template=bug_report.md)
 
-[提交功能建议](https://github.com/AetherStudioTeam/E_Sharp_Lang/issues/new?template=feature_request.md)
+[提交功能建议](https://github.com/AetherStudioTeam/Kairote_Lang/issues/new?template=feature_request.md)
 
 ---
 
@@ -257,7 +257,7 @@ copies or substantial portions of the Software.
 | 邮箱 | [AetherStudio@qq.com](mailto:AetherStudio@qq.com) |
 | QQ 群 | [791809691](https://jq.qq.com/?_wv=1027&k=xxxxxx) |
 | 官网 | [https://es.aetstudio.xyz/](https://es.aetstudio.xyz/) |
-| GitHub | [https://github.com/AetherStudioTeam/E_Sharp_Lang](https://github.com/AetherStudioTeam/E_Sharp_Lang) |
+| GitHub | [https://github.com/AetherStudioTeam/Kairote_Lang](https://github.com/AetherStudioTeam/Kairote_Lang) |
 
 </div>
 
@@ -276,8 +276,8 @@ copies or substantial portions of the Software.
 
 感谢所有为这个项目做出贡献的开发者！
 
-<a href="https://github.com/AetherStudioTeam/E_Sharp_Lang/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=AetherStudioTeam/E_Sharp_Lang" />
+<a href="https://github.com/AetherStudioTeam/Kairote_Lang/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=AetherStudioTeam/Kairote_Lang" />
 </a>
 
 ---
