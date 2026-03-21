@@ -242,9 +242,7 @@ copies or substantial portions of the Software.
 ---
 
 ## 相关项目
-
-- [LumenCode](https://github.com/AetherStudioTeam/LumenCode) - 非商业音游项目
-- [RedstLauncher](https://github.com/AetherStudioTeam/RedstLauncher) - Minecraft 启动器
+- None
 
 ---
 
@@ -254,10 +252,9 @@ copies or substantial portions of the Software.
 
 | 渠道 | 链接 |
 |------|------|
-| 邮箱 | [AetherStudio@qq.com](mailto:AetherStudio@qq.com) |
+| 邮箱 | [AetherStudio@qq.com](mailto:KairoteStudio@qq.com) |
 | QQ 群 | [791809691](https://jq.qq.com/?_wv=1027&k=xxxxxx) |
-| 官网 | [https://es.aetstudio.xyz/](https://es.aetstudio.xyz/) |
-| GitHub | [https://github.com/AetherStudioTeam/Kairote_Lang](https://github.com/AetherStudioTeam/Kairote_Lang) |
+| GitHub | [https://github.com/AetherStudioTeam/Kairote_Lang](https://github.com/KairoteStudio/Kairote_Lang) |
 
 </div>
 
