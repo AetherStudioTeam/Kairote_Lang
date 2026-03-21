@@ -4,7 +4,7 @@
 
 # **Kairote Programming Language**
 
-### *下一代系统级编程语言 | 编译速度比你想的快亿点点*
+### *系统级编程语言 | 编译速度比你想的快亿点点*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Stars](https://img.shields.io/github/stars/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=blue)](https://github.com/AetherStudioTeam/Kairote_Lang/stargazers)
