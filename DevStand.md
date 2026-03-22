@@ -6,7 +6,7 @@ Kairote编译器采用经典的三段式架构设计：
 
 ### 0.1 编译器架构层次
 ```
-源代码 (.esf) 
+源代码 (.krt) 
     ↓
 前端 (Frontend) - 词法分析、语法分析、语义分析
     ↓
@@ -113,8 +113,8 @@ int function_name(int param)
 ### 2.1 测试文件规范
 - **位置**: 所有测试文件必须放在 `Test/` 目录下
 - **命名**: 使用 `test_` 前缀，描述性名称
-  - 正确: `Test/test_console_simple.esf`
-  - 错误: `test_console_simple.esf` (放在根目录)
+  - 正确: `Test/test_console_simple.ktr`
+  - 错误: `test_console_simple.ktr` (放在根目录)
 - **分类**: 按功能分类放置
   - 语法测试: `Test/syntax/`
   - 功能测试: `Test/features/`
@@ -506,4 +506,4 @@ int function_name(int param1, const char* param2);
 ---
 
 **注意**: 本文档会根据项目发展持续更新，请定期查看最新版本。
-**当前版本**: v1.0 (2025年更新，补充架构和详细规范)
+**当前版本**: v1.2 (2026年更新，更新语言名称)
