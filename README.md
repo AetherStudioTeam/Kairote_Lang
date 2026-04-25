@@ -44,17 +44,15 @@
 
 ```KrtL
 // KairoteLang 代码示例
-module HelloWorld;
+Namespace HelloWorld;
 
-import System.Console;
+using System;
 
 public class Program
 {
     public static void Main(string[] args)
-    {
-        var result = a <> b <> c;  // 范围比较
-        
-        Console.WriteLine($"Hello, KairoteLang!");
+    {        
+        Console.WriteLine("Hello, KairoteLang!");
     }
 }
 ```
@@ -86,22 +84,24 @@ pip install -r requirements.txt
 # 开发构建
 python build.py
 
-# 发布构建（优化）
+# 发布构建
 python build.py --release
 ```
 
 ### 编写你的第一个 KairoteLang 程序 或 [学习文档](./docs/KrtC/doc/README.md)
 
-创建 `hello.es` 文件：
+创建 `hello.krt` 文件：
 
 ```KrtL
-module Hello;
+using System
+
+Namespace Hello;
 
 public class Program
 {
     public static void Main()
     {
-        System.Console.WriteLine("Hello, KairoteLang!");
+        Console.WriteLine("Hello, KairoteLang!");
     }
 }
 ```
@@ -109,7 +109,7 @@ public class Program
 编译并运行：
 
 ```bash
-./esc build hello.krt
+KrtC build hello.krt
 ./hello
 ```
 
