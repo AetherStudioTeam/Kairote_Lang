@@ -7,16 +7,16 @@
 ### *系统级编程语言 | 编译速度比你想的快亿点点*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Stars](https://img.shields.io/github/stars/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=blue)](https://github.com/AetherStudioTeam/Kairote_Lang/stargazers)
-[![Forks](https://img.shields.io/github/forks/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=orange)](https://github.com/AetherStudioTeam/Kairote_Lang/network/members)
-[![Issues](https://img.shields.io/github/issues/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=red)](https://github.com/AetherStudioTeam/Kairote_Lang/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=git&color=green)](https://github.com/AetherStudioTeam/Kairote_Lang/commits)
-[![Code Size](https://img.shields.io/github/languages/code-size/AetherStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=purple)](https://github.com/AetherStudioTeam/Kairote_Lang)
+[![Stars](https://img.shields.io/github/stars/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=blue)](https://github.com/KairoteStudioTeam/Kairote_Lang/stargazers)
+[![Forks](https://img.shields.io/github/forks/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=orange)](https://github.com/KairoteStudioTeam/Kairote_Lang/network/members)
+[![Issues](https://img.shields.io/github/issues/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=red)](https://github.com/KairoteStudioTeam/Kairote_Lang/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=git&color=green)](https://github.com/KairoteStudioTeam/Kairote_Lang/commits)
+[![Code Size](https://img.shields.io/github/languages/code-size/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=purple)](https://github.com/KairoteStudioTeam/Kairote_Lang)
 [![C](https://img.shields.io/badge/C-00599C?style=for-the-badge&logo=c&logoColor=white)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![Made by Aether](https://img.shields.io/badge/Made%20by-Aether%20Studio-00d4aa?style=for-the-badge)](https://www.aetstudio.xyz)
+[![Made by Kairote](https://img.shields.io/badge/Made%20by-Kairote%20Studio-00d4aa?style=for-the-badge)](https://none/)
 
-[官网](https://es.aetstudio.xyz/) | [文档](https://es.aetstudio.xyz/docs) | [讨论区](https://github.com/AetherStudioTeam/Kairote_Lang/discussions) | [提交问题](https://github.com/AetherStudioTeam/Kairote_Lang/issues/new/choose)
+[官网](https://none/) | [文档](https://none/) | [讨论区](https://github.com/KairoteStudioTeam/Kairote_Lang/discussions) | [提交问题](https://github.com/KairoteStudioTeam/Kairote_Lang/issues/new/choose)
 
 </div>
 
@@ -24,11 +24,11 @@
 
 ## 概述
 
-**Kairote** 是一个由 **Aether Studio** 开发的现代系统级编程语言，专为追求极致性能与优雅语法的开发者而生。
+**KairoteLang** 是一个由 **Kairote Studio** 开发的现代系统级编程语言，专为追求极致性能与优雅语法的开发者而生。
 
 > **我们的愿景**：打造一款兼具 C++ 性能(但目前仅在部分领域上赶超)、C# 优雅、Rust 安全(当前阶段尚未实现)的编程语言，让系统编程变得简单而强大。
 
-### 为什么选择 Kairote？
+### 为什么选择 KairoteLang？
 
 | 特性 | 描述 |
 |------|------|
@@ -42,8 +42,8 @@
 
 ## 预览
 
-```csharp
-// Kairote 代码示例
+```KrtL
+// KairoteLang 代码示例
 module HelloWorld;
 
 import System.Console;
@@ -52,10 +52,9 @@ public class Program
 {
     public static void Main(string[] args)
     {
-        // 多元运算符 - Kairote 独有特性
         var result = a <> b <> c;  // 范围比较
         
-        Console.WriteLine($"Hello, Kairote World!");
+        Console.WriteLine($"Hello, KairoteLang!");
     }
 }
 ```
@@ -68,13 +67,13 @@ public class Program
 
 - **操作系统**: Windows 10/11 | Linux | macOS
 - **Python**: 3.8+
-- **编译器**: GCC 或 MSVC
+- **编译器**: GCC
 
 ### 安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/AetherStudioTeam/Kairote_Lang.git
+git clone https://github.com/KairoteStudioTeam/Kairote_Lang.git
 cd Kairote_Lang
 
 # 安装依赖
@@ -91,18 +90,18 @@ python build.py
 python build.py --release
 ```
 
-### 编写你的第一个 Kairote 程序 或 [学习文档](./docs/doc/README.md)
+### 编写你的第一个 KairoteLang 程序 或 [学习文档](./docs/KrtC/doc/README.md)
 
 创建 `hello.es` 文件：
 
-```csharp
+```KrtL
 module Hello;
 
 public class Program
 {
     public static void Main()
     {
-        System.Console.WriteLine("Hello, Kairote!");
+        System.Console.WriteLine("Hello, KairoteLang!");
     }
 }
 ```
@@ -110,7 +109,7 @@ public class Program
 编译并运行：
 
 ```bash
-./esc build hello.es
+./esc build hello.krt
 ./hello
 ```
 
@@ -120,16 +119,16 @@ public class Program
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Kairote Toolchain                    │
+│                    KairoteLang Toolchain                    │
 ├─────────────┬─────────────┬─────────────┬───────────────────┤
-│   ESC       │   ArkLink   │    LSP      │   Runtime         │
-│  编译器      │   链接器     │  语言服务    │   运行时           │
+│   KrtC      │   ArkLink   │    LSP      │   Runtime         │
+│  编译器      │   链接器    │  语言服务    │   运行时           │
 ├─────────────┼─────────────┼─────────────┼───────────────────┤
-│ • 词法分析   │ • COFF/ELF  │ • 代码补全   │ • 内存管理         │
-│ • 语法分析   │ • PE 后端   │ • 错误诊断   │ • 垃圾回收         │
-│ • 语义分析   │ • 符号解析   │ • 跳转定义   │ • 异常处理         │
-│ • SSA IR    │ • 重定位     │ • 悬停提示   │ • 标准库           │
-│ • 代码生成   │ • 库文件     │             │                   │
+│   词法分析   │  COFF/ELF   │   代码补全   │  内存管理         │
+│   语法分析   │    PE后端   │   错误诊断   │  垃圾回收         │
+│   语义分析   │   符号解析   │   跳转定义   │  异常处理         │
+│   SSA IR    │   重定位     │   悬停提示   │  标准库           │
+│   代码生成   │   库文件     │             │                   │
 └─────────────┴─────────────┴─────────────┴───────────────────┘
 ```
 
@@ -137,7 +136,7 @@ public class Program
 
 ```
 Kairote_Lang/
-├── ESC/                    # 编译器核心
+├── KrtC/                    # 编译器核心
 │   ├── src/
 │   │   ├── compiler/       # 编译器前端、中端、后端
 │   │   ├── runtime/        # 运行时库
@@ -157,7 +156,7 @@ Kairote_Lang/
 
 ## 技术特性
 
-### 编译器 (ESC)
+### 编译器 (KrtC)
 
 - **前端**: 递归下降语法分析器，支持完整的 C# 语法子集
 - **中端**: SSA 形式的中间表示，支持多种优化 passes
@@ -199,9 +198,9 @@ Kairote_Lang/
 ### 如何贡献
 
 1. **Fork** 本仓库
-2. 创建你的 **Feature Branch** (`git checkout -b feature/AmazingFeature`)
-3. **Commit** 你的更改 (`git commit -m 'Add some AmazingFeature'`)
-4. **Push** 到分支 (`git push origin feature/AmazingFeature`)
+2. 创建你的 **Feature Branch** (`git checkout -b feature/Feature`)
+3. **Commit** 你的更改 (`git commit -m 'Add some Feature'`)
+4. **Push** 到分支 (`git push origin feature/Feature`)
 5. 打开一个 **Pull Request**
 
 ### 提交规范
@@ -213,9 +212,9 @@ Kairote_Lang/
 
 [查看贡献指南](./DevStand.md)
 
-[提交 Bug 报告](https://github.com/AetherStudioTeam/Kairote_Lang/issues/new?template=bug_report.md)
+[提交 Bug 报告](https://github.com/KairoteStudioTeam/Kairote_Lang/issues/new?template=bug_report.md)
 
-[提交功能建议](https://github.com/AetherStudioTeam/Kairote_Lang/issues/new?template=feature_request.md)
+[提交功能建议](https://github.com/KairoteStudioTeam/Kairote_Lang/issues/new?template=feature_request.md)
 
 ---
 
@@ -226,7 +225,7 @@ Kairote_Lang/
 ```
 MIT License
 
-Copyright (c) 2026 Aether Studio
+Copyright (c) 2026 Kairote Studio
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -252,10 +251,9 @@ copies or substantial portions of the Software.
 
 | 渠道 | 链接 |
 |------|------|
-| 邮箱 | [AetherStudio@qq.com](mailto:KairoteStudio@qq.com) |
-| QQ 群 | [791809691](https://jq.qq.com/?_wv=1027&k=xxxxxx) |
-| GitHub | [https://github.com/AetherStudioTeam/Kairote_Lang](https://github.com/KairoteStudio/Kairote_Lang) |
-
+| 邮箱 | [?@?.?](?@?.?) |
+| QQ 群 | [791809691](https://jq.qq.com/?_wv=1027&k=791809691) |
+| GitHub | [https://github.com/KairoteStudio_Lang](https://github.com/KairoteStudioTeam/Kairote_Lang) |
 </div>
 
 ---
@@ -273,16 +271,16 @@ copies or substantial portions of the Software.
 
 感谢所有为这个项目做出贡献的开发者！
 
-<a href="https://github.com/AetherStudioTeam/Kairote_Lang/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=AetherStudioTeam/Kairote_Lang" />
+<a href="https://github.com/KairoteStudioTeam/Kairote_Lang/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=KairoteStudioTeam/Kairote_Lang" />
 </a>
 
 ---
 
 <div align="center">
 
-### 如果这个项目对你有帮助，请给我们一颗星！
+### 如果这个项目对你有帮助，请给我们一颗Star！
 
-**Made with ❤️ by Aether Studio**
+**Made with ❤️ by Kairote Studio**
 
 </div>
