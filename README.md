@@ -7,16 +7,16 @@
 ### *系统级编程语言 | 编译速度比你想的快亿点点*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Stars](https://img.shields.io/github/stars/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=blue)](https://github.com/KairoteStudioTeam/Kairote_Lang/stargazers)
-[![Forks](https://img.shields.io/github/forks/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=orange)](https://github.com/KairoteStudioTeam/Kairote_Lang/network/members)
-[![Issues](https://img.shields.io/github/issues/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=red)](https://github.com/KairoteStudioTeam/Kairote_Lang/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=git&color=green)](https://github.com/KairoteStudioTeam/Kairote_Lang/commits)
-[![Code Size](https://img.shields.io/github/languages/code-size/KairoteStudioTeam/Kairote_Lang?style=for-the-badge&logo=github&color=purple)](https://github.com/KairoteStudioTeam/Kairote_Lang)
+[![Stars](https://img.shields.io/github/stars/KairoteStudio/Kairote_Lang?style=for-the-badge&logo=github&color=blue)](https://github.com/KairoteStudio/Kairote_Lang/stargazers)
+[![Forks](https://img.shields.io/github/forks/KairoteStudio/Kairote_Lang?style=for-the-badge&logo=github&color=orange)](https://github.com/KairoteStudio/Kairote_Lang/network/members)
+[![Issues](https://img.shields.io/github/issues/KairoteStudio/Kairote_Lang?style=for-the-badge&logo=github&color=red)](https://github.com/KairoteStudio/Kairote_Lang/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/KairoteStudio/Kairote_Lang?style=for-the-badge&logo=git&color=green)](https://github.com/KairoteStudio/Kairote_Lang/commits)
+[![Code Size](https://img.shields.io/github/languages/code-size/KairoteStudio/Kairote_Lang?style=for-the-badge&logo=github&color=purple)](https://github.com/KairoteStudio/Kairote_Lang)
 [![C](https://img.shields.io/badge/C-00599C?style=for-the-badge&logo=c&logoColor=white)](https://en.wikipedia.org/wiki/C_(programming_language))
 [![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Made by Kairote](https://img.shields.io/badge/Made%20by-Kairote%20Studio-00d4aa?style=for-the-badge)](https://none/)
 
-[官网](https://none/) | [文档](https://none/) | [讨论区](https://github.com/KairoteStudioTeam/Kairote_Lang/discussions) | [提交问题](https://github.com/KairoteStudioTeam/Kairote_Lang/issues/new/choose)
+[官网](https://none/) | [文档](https://none/) | [讨论区](https://github.com/KairoteStudio/Kairote_Lang/discussions) | [提交问题](https://github.com/KairoteStudio/Kairote_Lang/issues/new/choose)
 
 </div>
 
@@ -73,7 +73,7 @@ public class Program
 
 ```bash
 # 克隆仓库
-git clone https://github.com/KairoteStudioTeam/Kairote_Lang.git
+git clone https://github.com/KairoteStudio/Kairote_Lang.git
 cd Kairote_Lang
 
 # 安装依赖
@@ -212,9 +212,9 @@ Kairote_Lang/
 
 [查看贡献指南](./DevStand.md)
 
-[提交 Bug 报告](https://github.com/KairoteStudioTeam/Kairote_Lang/issues/new?template=bug_report.md)
+[提交 Bug 报告](https://github.com/KairoteStudio/Kairote_Lang/issues/new?template=bug_report.md)
 
-[提交功能建议](https://github.com/KairoteStudioTeam/Kairote_Lang/issues/new?template=feature_request.md)
+[提交功能建议](https://github.com/KairoteStudio/Kairote_Lang/issues/new?template=feature_request.md)
 
 ---
 
@@ -253,7 +253,7 @@ copies or substantial portions of the Software.
 |------|------|
 | 邮箱 | [?@?.?](?@?.?) |
 | QQ 群 | [791809691](https://jq.qq.com/?_wv=1027&k=791809691) |
-| GitHub | [https://github.com/KairoteStudio_Lang](https://github.com/KairoteStudioTeam/Kairote_Lang) |
+| GitHub | [https://github.com/KairoteStudio_Lang](https://github.com/KairoteStudio/Kairote_Lang) |
 </div>
 
 ---
@@ -271,8 +271,8 @@ copies or substantial portions of the Software.
 
 感谢所有为这个项目做出贡献的开发者！
 
-<a href="https://github.com/KairoteStudioTeam/Kairote_Lang/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=KairoteStudioTeam/Kairote_Lang" />
+<a href="https://github.com/KairoteStudio/Kairote_Lang/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=KairoteStudio/Kairote_Lang" />
 </a>
 
 ---
