@@ -1,6 +1,8 @@
 <div align="center">
 
-<svg width="200" height="60" viewBox="0 0 200 60" xmlns="http://www.w3.org/2000/svg" style="cursor: pointer; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); translate: none; rotate: none; scale: none; transform: translate(0px, 0px);"><text x="15" y="38" font-family="'Google Sans', 'Segoe UI', sans-serif" font-size="30" font-weight="1000" fill="url(#esharpGradient)" filter="url(#glow)" style="transition: 0.3s;">Kairote</text><text x="100" y="30" font-family="'Google Sans', 'Segoe UI', sans-serif" font-size="14" font-weight="400" fill="#CCCCCC" letter-spacing="1" style="transition: 0.3s;">LANGUAGE</text><g transform="translate(100, 38)" style="transition: opacity 0.3s;"><text x="18" y="1.5" font-family="monospace" font-size="8" fill="#00FF88">BY AetherStudio</text></g></svg>
+Kairote Programming Language
+
+<svg><g><text x="18" y="1.5" font-family="monospace" font-size="8" fill="#00FF88">BY KairoteStudio</text></g></svg>
 
 # **Kairote Programming Language**
 
