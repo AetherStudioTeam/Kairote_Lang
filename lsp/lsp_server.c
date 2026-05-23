@@ -43,7 +43,7 @@ LspServer* lsp_server_create(void) {
     LspServer* server = (LspServer*)calloc(1, sizeof(LspServer));
     if (!server) return NULL;
     
-    server->name = strdup("E# Language Server");
+    server->name = strdup("Kairote Lang Language Server");
     server->version = strdup("0.1.0");
     server->state = LSP_SERVER_STATE_UNINITIALIZED;
     server->documents = lsp_document_store_create();

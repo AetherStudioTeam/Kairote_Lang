@@ -1,0 +1,28 @@
+CompileFlags:
+  Add: [
+    "-Wall",
+    "-std=c23",
+    "-x", "c",
+    "-isystem", "C:/msys64/mingw64/x86_64-w64-mingw32/include",
+    "-isystem", "C:/msys64/mingw64/include",
+    "-isystem", "C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include",
+    "-isystem", "C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/15.2.0/include-fixed"
+  ]
+  Remove: [
+    "-mno-speculative-load-hardening",
+    "-fno-canonical-system-headers"
+  ]
+
+Diagnostics:
+  Suppress: [
+    "unused-variable",
+    "unknown-pragmas"
+  ]
+  ClangTidy:
+    Add: [
+      "bugprone-*",
+      "performance-*"
+    ]
+
+Index:
+  Background: Build

@@ -1,780 +1,439 @@
 #include "ArkLink/resolver.h"
+#include "ArkLink/context.h"
 #include "ArkLink/backend.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-
-typedef struct ArkSymbolEntry {
-    struct ArkSymbolEntry* next;
-    const char* name;
-    ArkResolverSymbol* symbol;
-    size_t symbol_index;
-} ArkSymbolEntry;
-
+typedef struct {
+    ArkResolverSymbol* symbols;
+    size_t symbol_count;
+    size_t symbol_capacity;
+} SymbolTable;
 
 typedef struct {
-    ArkSymbolEntry** buckets;
-    size_t bucket_count;
-} ArkSymbolTable;
+    ArkResolverReloc* relocs;
+    size_t reloc_count;
+    size_t reloc_capacity;
+} RelocTable;
 
-typedef struct ArkResolverState {
-    ArkLinkContext* ctx;
-    ArkLinkUnit** units;
-    size_t unit_count;
-    size_t unit_capacity;
-    ArkResolverPlan* plan;
-    ArkSymbolTable symtab;
-} ArkResolverState;
-
-
-static size_t ark_hash_string(const char* str) {
-    size_t hash = 1469598103934665603ull;
-    while (*str) {
-        hash ^= (unsigned char)*str++;
-        hash *= 1099511628211ull;
-    }
-    return hash;
+static int symbol_table_init(SymbolTable* table, size_t initial_capacity) {
+    table->symbols = (ArkResolverSymbol*)malloc(initial_capacity * sizeof(ArkResolverSymbol));
+    if (!table->symbols) return 0;
+    table->symbol_count = 0;
+    table->symbol_capacity = initial_capacity;
+    return 1;
 }
 
-
-static ArkLinkResult ark_symtab_init(ArkSymbolTable* table, size_t bucket_count) {
-    table->buckets = (ArkSymbolEntry**)calloc(bucket_count, sizeof(ArkSymbolEntry*));
-    if (!table->buckets) {
-        return ARK_LINK_ERR_MEMORY;
+static void symbol_table_free(SymbolTable* table) {
+    if (table->symbols) {
+        free(table->symbols);
     }
-    table->bucket_count = bucket_count;
-    return ARK_LINK_OK;
 }
 
-
-static void ark_symtab_free(ArkSymbolTable* table) {
-    if (!table || !table->buckets) {
-        return;
-    }
-    for (size_t i = 0; i < table->bucket_count; i++) {
-        ArkSymbolEntry* entry = table->buckets[i];
-        while (entry) {
-            ArkSymbolEntry* next = entry->next;
-            free(entry);
-            entry = next;
+static int symbol_table_add(SymbolTable* table, const ArkResolverSymbol* sym) {
+    
+    for (size_t i = 0; i < table->symbol_count; i++) {
+        if (strcmp(table->symbols[i].name, sym->name) == 0) {
+            
+            if (table->symbols[i].section_index == 0 && sym->section_index > 0) {
+                
+                table->symbols[i] = *sym;
+            } else if (table->symbols[i].section_index > 0 && sym->section_index > 0) {
+                
+                fprintf(stderr, "[ArkLink] Warning: Symbol '%s' defined multiple times, using first definition (section=%u)\n", 
+                        sym->name, table->symbols[i].section_index);
+            } else {
+                
+                fprintf(stderr, "[ArkLink] Symbol '%s': keeping existing definition\n", sym->name);
+            }
+            return 1;
         }
     }
-    free(table->buckets);
-    table->buckets = NULL;
-    table->bucket_count = 0;
+    
+    if (table->symbol_count >= table->symbol_capacity) {
+        size_t new_capacity = table->symbol_capacity * 2;
+        ArkResolverSymbol* new_symbols = (ArkResolverSymbol*)realloc(table->symbols, new_capacity * sizeof(ArkResolverSymbol));
+        if (!new_symbols) return 0;
+        table->symbols = new_symbols;
+        table->symbol_capacity = new_capacity;
+    }
+    table->symbols[table->symbol_count++] = *sym;
+    return 1;
 }
 
+static int reloc_table_init(RelocTable* table, size_t initial_capacity) {
+    table->relocs = (ArkResolverReloc*)malloc(initial_capacity * sizeof(ArkResolverReloc));
+    if (!table->relocs) return 0;
+    table->reloc_count = 0;
+    table->reloc_capacity = initial_capacity;
+    return 1;
+}
 
-static ArkSymbolEntry* ark_symtab_lookup(ArkSymbolTable* table, const char* name) {
-    size_t idx = ark_hash_string(name) % table->bucket_count;
-    ArkSymbolEntry* entry = table->buckets[idx];
-    while (entry) {
-        if (strcmp(entry->name, name) == 0) {
-            return entry;
+static void reloc_table_free(RelocTable* table) {
+    if (table->relocs) {
+        free(table->relocs);
+    }
+}
+
+static int reloc_table_add(RelocTable* table, const ArkResolverReloc* reloc) {
+    if (table->reloc_count >= table->reloc_capacity) {
+        size_t new_capacity = table->reloc_capacity * 2;
+        ArkResolverReloc* new_relocs = (ArkResolverReloc*)realloc(table->relocs, new_capacity * sizeof(ArkResolverReloc));
+        if (!new_relocs) return 0;
+        table->relocs = new_relocs;
+        table->reloc_capacity = new_capacity;
+    }
+    table->relocs[table->reloc_count++] = *reloc;
+    return 1;
+}
+
+static ArkResolverSymbol* find_symbol(SymbolTable* table, const char* name) {
+    for (size_t i = 0; i < table->symbol_count; i++) {
+        if (table->symbols[i].name && strcmp(table->symbols[i].name, name) == 0) {
+            return &table->symbols[i];
         }
-        entry = entry->next;
     }
     return NULL;
 }
 
-
-static ArkLinkResult ark_symtab_insert(ArkSymbolTable* table, const char* name, 
-                              ArkResolverSymbol* symbol, size_t symbol_index) {
-    size_t idx = ark_hash_string(name) % table->bucket_count;
-    
-    
-    ArkSymbolEntry* existing = table->buckets[idx];
-    while (existing) {
-        if (strcmp(existing->name, name) == 0) {
-            return ARK_LINK_ERR_FORMAT;  
-        }
-        existing = existing->next;
+ArkLinkResult ark_resolver_resolve(ArkLinkContext* ctx, ArkLinkUnit* const* units, size_t unit_count, ArkResolverPlan* out_plan) {
+    if (!ctx || !units || unit_count == 0 || !out_plan) {
+        return ARK_LINK_ERR_INVALID_ARGUMENT;
     }
-    
-    ArkSymbolEntry* entry = (ArkSymbolEntry*)malloc(sizeof(ArkSymbolEntry));
-    if (!entry) {
+
+    memset(out_plan, 0, sizeof(ArkResolverPlan));
+
+    SymbolTable sym_table;
+    if (!symbol_table_init(&sym_table, 64)) {
         return ARK_LINK_ERR_MEMORY;
     }
-    
-    entry->name = name;
-    entry->symbol = symbol;
-    entry->symbol_index = symbol_index;
-    entry->next = table->buckets[idx];
-    table->buckets[idx] = entry;
-    
-    return ARK_LINK_OK;
-}
 
+    RelocTable reloc_table;
+    if (!reloc_table_init(&reloc_table, 64)) {
+        symbol_table_free(&sym_table);
+        return ARK_LINK_ERR_MEMORY;
+    }
 
-static ArkLinkResult ark_resolver_collect_symbols(ArkResolverState* state) {
-    
-    size_t total = 0;
-    for (size_t i = 0; i < state->unit_count; ++i) {
-        total += state->units[i]->symbol_count;
+    uint32_t* unit_sym_start = (uint32_t*)calloc(unit_count, sizeof(uint32_t));
+    if (!unit_sym_start) {
+        reloc_table_free(&reloc_table);
+        symbol_table_free(&sym_table);
+        return ARK_LINK_ERR_MEMORY;
     }
-    
-    if (total == 0) {
-        state->plan->symbols = NULL;
-        state->plan->symbol_count = 0;
-        return ARK_LINK_OK;
+
+    uint32_t* unit_sec_start = (uint32_t*)calloc(unit_count, sizeof(uint32_t));
+    if (!unit_sec_start) {
+        free(unit_sym_start);
+        reloc_table_free(&reloc_table);
+        symbol_table_free(&sym_table);
+        return ARK_LINK_ERR_MEMORY;
     }
-    
-    
-    size_t bucket_count = total * 2;
-    if (bucket_count < 16) bucket_count = 16;
-    ArkLinkResult result = ark_symtab_init(&state->symtab, bucket_count);
-    if (result != ARK_LINK_OK) {
-        return result;
+
+    size_t sec_idx_counter = 0;
+    for (size_t i = 0; i < unit_count; i++) {
+        ArkLinkUnit* unit = units[i];
+        if (!unit) continue;
+        unit_sec_start[i] = (uint32_t)sec_idx_counter;
+        sec_idx_counter += unit->section_count;
     }
-    
-    
-    state->plan->symbols = (ArkResolverSymbol*)calloc(total, sizeof(ArkResolverSymbol));
-    if (!state->plan->symbols) {
-        ark_symtab_free(&state->symtab);
-        return ARK_LINK_ERR_INTERNAL;
-    }
-    
-    
-    size_t cursor = 0;
-    for (size_t u = 0; u < state->unit_count; ++u) {
-        ArkLinkUnit* unit = state->units[u];
-        for (size_t s = 0; s < unit->symbol_count; ++s) {
-            ArkSymbolDesc* src = &unit->symbols[s];
+
+    for (size_t i = 0; i < unit_count; i++) {
+        ArkLinkUnit* unit = units[i];
+        if (!unit) continue;
+
+        unit_sym_start[i] = (uint32_t)sym_table.symbol_count;
+
+        for (size_t j = 0; j < unit->symbol_count; j++) {
+            ArkSymbolDesc* sym_desc = &unit->symbols[j];
+
+            ArkResolverSymbol sym = {0};
+            sym.name = sym_desc->name;
+            sym.binding = sym_desc->binding;
+            sym.visibility = sym_desc->visibility;
             
-            
-            ArkSymbolEntry* existing = ark_symtab_lookup(&state->symtab, src->name);
-            
-            if (existing) {
-                
-                ArkResolverSymbol* existing_sym = existing->symbol;
-                
-                if (src->binding == ARK_BIND_GLOBAL && 
-                    existing_sym->binding == ARK_BIND_GLOBAL) {
-                    
-                    ark_context_log(state->ctx, ARK_LOG_ERROR, 
-                        "Multiple definitions of symbol: %s", src->name);
-                    return ARK_LINK_ERR_FORMAT;
-                }
-                
-                if (src->binding == ARK_BIND_GLOBAL ||
-                    (src->binding == ARK_BIND_LOCAL && existing_sym->binding == ARK_BIND_WEAK)) {
-                    
-                    existing_sym->binding = src->binding;
-                    existing_sym->visibility = src->visibility;
-                    existing_sym->section_index = src->section_index;
-                    existing_sym->value = src->value;
-                    existing_sym->size = src->size;
-                    
-                    if (src->section_index > 0 && src->section_index <= unit->section_count) {
-                        existing_sym->section = unit->sections[src->section_index - 1].buffer;
-                    } else {
-                        existing_sym->section = NULL;
-                    }
-                }
-                
+            if (sym_desc->section_index > 0) {
+                sym.section_index = unit_sec_start[i] + sym_desc->section_index - 1;  
+                fprintf(stderr, "[ArkLink] Symbol '%s': unit=%zu, local_sec=%u, global_sec=%u\n", 
+                        sym.name ? sym.name : "(null)", i, sym_desc->section_index, sym.section_index);
             } else {
-                
-                ArkResolverSymbol* dst = &state->plan->symbols[cursor];
-                dst->name = src->name;
-                dst->binding = src->binding;
-                dst->visibility = src->visibility;
-                dst->section_index = src->section_index;
-                dst->value = src->value;
-                dst->size = src->size;
-                dst->import_id = -1;  
-                
-                if (src->section_index > 0 && src->section_index <= unit->section_count) {
-                    dst->section = unit->sections[src->section_index - 1].buffer;
-                } else {
-                    dst->section = NULL;
-                }
-                
-                result = ark_symtab_insert(&state->symtab, src->name, dst, cursor);
-                if (result != ARK_LINK_OK) {
-                    ark_symtab_free(&state->symtab);
-                    return result;
-                }
-                cursor++;
+                sym.section_index = 0;
+                fprintf(stderr, "[ArkLink] Symbol '%s': unit=%zu, undefined (section=0)\n", 
+                        sym.name ? sym.name : "(null)", i);
+            }
+            sym.value = (uint32_t)sym_desc->value;
+            sym.size = sym_desc->size;
+            sym.import_module = sym_desc->import_module;
+
+            if (sym_desc->binding == ARK_BIND_GLOBAL) {
+                sym.is_export = 1;
+            }
+
+            if (!symbol_table_add(&sym_table, &sym)) {
+                free(unit_sec_start);
+                free(unit_sym_start);
+                reloc_table_free(&reloc_table);
+                symbol_table_free(&sym_table);
+                return ARK_LINK_ERR_MEMORY;
             }
         }
     }
-    
-    state->plan->symbol_count = cursor;
-    return ARK_LINK_OK;
-}
 
+    out_plan->symbols = sym_table.symbols;
+    out_plan->symbol_count = sym_table.symbol_count;
 
-static ArkLinkResult ark_resolver_check_undefined(ArkResolverState* state) {
-    int has_undefined = 0;
-    const ArkParsedConfig* config = ark_context_config(state->ctx);
-    const ArkLinkJob* job = ark_context_job(state->ctx);
-
-    
-    int progress = 1;
-    while (progress) {
-        progress = 0;
-        size_t undef_count = 0;
-        const char** undef_names = NULL;
-
-        
-        for (size_t i = 0; i < state->plan->symbol_count; i++) {
-            ArkResolverSymbol* sym = &state->plan->symbols[i];
-            if (sym->section == NULL && sym->binding == ARK_BIND_GLOBAL) {
-                
-                int is_import = 0;
-                if (config && config->imports) {
-                    for (size_t k = 0; k < config->import_count; k++) {
-                        if (strcmp(config->imports[k].symbol, sym->name) == 0) {
-                            is_import = 1;
-                            break;
-                        }
-                    }
-                }
-                if (is_import) continue;
-
-                
-                const char** new_undef_names = (const char**)realloc(undef_names, (undef_count + 1) * sizeof(char*));
-                if (!new_undef_names) {
-                    free(undef_names);
-                    return ARK_LINK_ERR_MEMORY;
-                }
-                undef_names = new_undef_names;
-                undef_names[undef_count++] = sym->name;
-            }
-        }
-
-        if (undef_count == 0) break;
-
-        
-        
-        for (size_t i = 0; i < job->library_count; i++) {
-            char lib_path[512];
-            if (ark_loader_find_library(job->libraries[i], job->library_paths, job->library_path_count, lib_path, sizeof(lib_path)) == ARK_LINK_OK) {
-                ArkArchive* archive = NULL;
-                if (ark_loader_load_archive(state->ctx, lib_path, &archive, NULL) == ARK_LINK_OK) {
-                    ArkLinkUnit** extracted_units = NULL;
-                    size_t extracted_count = 0;
-                    if (ark_archive_extract_needed(state->ctx, archive, undef_names, undef_count, &extracted_units, &extracted_count) == ARK_LINK_OK && extracted_count > 0) {
-                        
-                        ArkLinkUnit** new_units = (ArkLinkUnit**)realloc(state->units, (state->unit_count + extracted_count) * sizeof(ArkLinkUnit*));
-                        if (!new_units) {
-                            free(extracted_units);
-                            free(undef_names);
-                            return ARK_LINK_ERR_MEMORY;
-                        }
-                        state->units = new_units;
-                        for (size_t j = 0; j < extracted_count; j++) {
-                            state->units[state->unit_count++] = extracted_units[j];
-                        }
-                        free(extracted_units);
-                        progress = 1;
-                        
-                        
-                        ark_symtab_free(&state->symtab);
-                        free(state->plan->symbols);
-                        state->plan->symbols = NULL;
-                        state->plan->symbol_count = 0;
-                        ark_resolver_collect_symbols(state);
-                    }
-                    ark_archive_destroy(state->ctx, archive);
-                }
-            }
-            if (progress) break;
-        }
-        free(undef_names);
+    out_plan->backend_input = (ArkBackendInput*)calloc(1, sizeof(ArkBackendInput));
+    if (!out_plan->backend_input) {
+        reloc_table_free(&reloc_table);
+        symbol_table_free(&sym_table);
+        return ARK_LINK_ERR_MEMORY;
     }
 
-    for (size_t i = 0; i < state->plan->symbol_count; i++) {
-        ArkResolverSymbol* sym = &state->plan->symbols[i];
-
-        
-        if (sym->section == NULL && sym->binding == ARK_BIND_GLOBAL) {
-             if (config && config->imports) {
-                for (size_t k = 0; k < config->import_count; k++) {
-                    if (strcmp(config->imports[k].symbol, sym->name) == 0) {
-                        sym->binding = ARK_BIND_WEAK;  
-                        sym->import_id = (int32_t)k; 
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (sym->binding == ARK_BIND_WEAK ||
-            (sym->section == NULL && sym->binding != ARK_BIND_LOCAL)) {
-            
-            ArkSymbolEntry* entry = ark_symtab_lookup(&state->symtab, sym->name);
-            if (entry && entry->symbol != sym) {
-                ArkResolverSymbol* def = entry->symbol;
-                if (def->binding != ARK_BIND_WEAK && def->section != NULL) {
-                    
-                    sym->binding = def->binding;
-                    sym->section = def->section;
-                    sym->section_index = def->section_index;
-                    sym->value = def->value;
-                    sym->size = def->size;
-                    continue;
-                }
-            }
-            
-            
-            int is_import = 0;
-            if (config && config->imports) {
-                for (size_t k = 0; k < config->import_count; k++) {
-                    if (strcmp(config->imports[k].symbol, sym->name) == 0) {
-                        is_import = 1;
-                        break;
-                    }
-                }
-            }
-
-            
-            if (sym->binding == ARK_BIND_WEAK || is_import) {
-                sym->binding = ARK_BIND_WEAK; 
-                continue;
-            }
-            
-            ark_context_log(state->ctx, ARK_LOG_ERROR,
-                "Undefined symbol: %s", sym->name);
-            has_undefined = 1;
+    size_t total_sections = 0;
+    for (size_t i = 0; i < unit_count; i++) {
+        if (units[i]) {
+            total_sections += units[i]->section_count;
         }
     }
-    
-    if (has_undefined) {
-        return ARK_LINK_ERR_UNRESOLVED_SYMBOL;
-    }
-    
-    return ARK_LINK_OK;
-}
 
-
-static ArkLinkResult ark_resolver_build_import_plan(ArkResolverState* state) {
-    const ArkParsedConfig* config = ark_context_config(state->ctx);
-
-    
-    size_t import_count = 0;
-    for (size_t i = 0; i < state->plan->symbol_count; i++) {
-        ArkResolverSymbol* sym = &state->plan->symbols[i];
-        if (sym->binding == ARK_BIND_WEAK) {
-            import_count++;
-        }
-    }
-    
-    if (import_count == 0) {
-        state->plan->imports = NULL;
-        state->plan->import_count = 0;
-        return ARK_LINK_OK;
-    }
-    
-    
-    state->plan->imports = (ArkImportBinding*)calloc(import_count, sizeof(ArkImportBinding));
-    if (!state->plan->imports) {
-        return ARK_LINK_ERR_INTERNAL;
-    }
-    
-    
-    size_t slot = 0;
-    for (size_t i = 0; i < state->plan->symbol_count; i++) {
-        ArkResolverSymbol* sym = &state->plan->symbols[i];
-        if (sym->binding == ARK_BIND_WEAK) {
-            ArkImportBinding* imp = &state->plan->imports[slot];
-            
-            
-            const char* module_name = "unknown";
-            if (config && config->imports) {
-                for (size_t k = 0; k < config->import_count; k++) {
-                    if (strcmp(config->imports[k].symbol, sym->name) == 0) {
-                        module_name = config->imports[k].module;
-                        
-                        sym->import_id = (int32_t)slot;
-                        break;
-                    }
-                }
-            }
-
-            imp->module = module_name;
-            imp->symbol = sym->name;
-            imp->slot = (uint32_t)slot;
-            slot++;
-        }
-    }
-    
-    state->plan->import_count = slot;
-    return ARK_LINK_OK;
-}
-
-
-static ArkLinkResult ark_resolver_collect_exports(ArkResolverState* state) {
-    const ArkParsedConfig* config = ark_context_config(state->ctx);
-    if (!config || config->export_symbol_count == 0) {
-        state->plan->exports = NULL;
-        state->plan->export_count = 0;
+    if (total_sections == 0) {
+        reloc_table_free(&reloc_table);
+        free(out_plan->backend_input);
+        symbol_table_free(&sym_table);
         return ARK_LINK_OK;
     }
 
-    state->plan->exports = (ArkExportBinding*)calloc(config->export_symbol_count, sizeof(ArkExportBinding));
-    if (!state->plan->exports) {
-        return ARK_LINK_ERR_INTERNAL;
+    out_plan->backend_input->sections = (ArkSectionBuffer*)calloc(total_sections, sizeof(ArkSectionBuffer));
+    if (!out_plan->backend_input->sections) {
+        reloc_table_free(&reloc_table);
+        free(out_plan->backend_input);
+        symbol_table_free(&sym_table);
+        return ARK_LINK_ERR_MEMORY;
     }
 
-    size_t cursor = 0;
-    for (size_t i = 0; i < config->export_symbol_count; i++) {
-        const char* export_name = config->export_symbols[i];
-        
-        
-        ArkSymbolEntry* entry = ark_symtab_lookup(&state->symtab, export_name);
-        if (!entry) {
-            ark_context_log(state->ctx, ARK_LOG_WARN,
-                "Exported symbol not found: %s", export_name);
+    uint32_t** section_map = (uint32_t**)calloc(unit_count, sizeof(uint32_t*));
+    if (!section_map) {
+        reloc_table_free(&reloc_table);
+        free(out_plan->backend_input->sections);
+        free(out_plan->backend_input);
+        symbol_table_free(&sym_table);
+        return ARK_LINK_ERR_MEMORY;
+    }
+
+    size_t sec_idx = 0;
+    for (size_t i = 0; i < unit_count; i++) {
+        ArkLinkUnit* unit = units[i];
+        if (!unit) {
+            section_map[i] = NULL;
             continue;
         }
 
-        entry->symbol->is_export = 1;
-
-        ArkExportBinding* exp = &state->plan->exports[cursor];
-        exp->name = export_name;
-        exp->symbol_index = (uint32_t)entry->symbol_index; 
-        
-
-
-
-
-
-
-
-        exp->symbol_index = (uint32_t)entry->symbol_index;
-        exp->ordinal = (uint32_t)(cursor + 1); 
-        cursor++;
-    }
-
-    state->plan->export_count = cursor;
-    return ARK_LINK_OK;
-}
-
-
-static ArkLinkResult ark_resolver_collect_relocs(ArkResolverState* state) {
-    size_t total = 0;
-    for (size_t i = 0; i < state->unit_count; ++i) {
-        total += state->units[i]->relocations.count;
-    }
-    
-    if (total == 0) {
-        state->plan->relocs = NULL;
-        state->plan->reloc_count = 0;
-        return ARK_LINK_OK;
-    }
-    
-    state->plan->relocs = (ArkResolverReloc*)calloc(total, sizeof(ArkResolverReloc));
-    if (!state->plan->relocs) {
-        return ARK_LINK_ERR_INTERNAL;
-    }
-    
-    size_t cursor = 0;
-    size_t symbol_offset = 0;
-
-    for (size_t u = 0; u < state->unit_count; ++u) {
-        ArkLinkUnit* unit = state->units[u];
-
-        for (size_t r = 0; r < unit->relocations.count; ++r) {
-            ArkRelocationDesc* src = &unit->relocations.relocs[r];
-            ArkResolverReloc* dst = &state->plan->relocs[cursor++];
-
-            
-
-            dst->section_index = src->section_index;
-            dst->offset = (uint32_t)src->offset;
-            dst->type = src->type;
-            dst->addend = src->addend;
-#ifdef ARKLINK_DEBUG
-            fprintf(stderr, "[DEBUG] ark_resolver_collect_relocs: src->addend=%d, dst->addend=%d\n",
-                    src->addend, dst->addend);
-#endif
-
-            
-            if (src->section_index > 0 && src->section_index <= unit->section_count) {
-                dst->section = unit->sections[src->section_index - 1].buffer;
-            } else {
-                dst->section = NULL;
+        section_map[i] = (uint32_t*)calloc(unit->section_count, sizeof(uint32_t));
+        if (!section_map[i]) {
+            for (size_t k = 0; k < i; k++) {
+                free(section_map[k]);
             }
-
-            
-            size_t symbol_index = symbol_offset + src->sym_idx;
-            if (symbol_index >= state->plan->symbol_count) {
-                return ARK_LINK_ERR_FORMAT;
-            }
-
-            
-            if (src->sym_idx < unit->symbol_count) {
-                ArkSymbolDesc* target_desc = &unit->symbols[src->sym_idx];
-                ArkSymbolEntry* entry = ark_symtab_lookup(&state->symtab, target_desc->name);
-
-                if (entry) {
-                    dst->symbol = entry->symbol;
-                } else {
-                    
-                    dst->symbol = &state->plan->symbols[symbol_index];
-                }
-            } else {
-                
-                dst->symbol = &state->plan->symbols[symbol_index];
-            }
+            free(section_map);
+            free(unit_sec_start);
+            free(unit_sym_start);
+            reloc_table_free(&reloc_table);
+            free(out_plan->backend_input->sections);
+            free(out_plan->backend_input);
+            symbol_table_free(&sym_table);
+            return ARK_LINK_ERR_MEMORY;
         }
 
-        symbol_offset += unit->symbol_count;
-    }
-    
-    state->plan->reloc_count = cursor;
-    return ARK_LINK_OK;
-}
+        for (size_t j = 0; j < unit->section_count; j++) {
+            ArkLinkSection* src = &unit->sections[j];
+            ArkSectionBuffer* dst = &out_plan->backend_input->sections[sec_idx];
 
-
-static void ark_resolver_find_entry(ArkResolverState* state) {
-    state->plan->entry_symbol = 0;
-    state->plan->entry_section = 0;
-    state->plan->entry_offset = 0;
-    
-    
-    const char* entry_names[] = {"main", "_start", "WinMain", "wmain"};
-    size_t entry_name_lens[] = {4, 6, 7, 5};
-    size_t num_entries = sizeof(entry_names) / sizeof(entry_names[0]);
-    
-    for (size_t i = 0; i < state->plan->symbol_count; i++) {
-        ArkResolverSymbol* sym = &state->plan->symbols[i];
-#ifdef ARKLINK_DEBUG
-        fprintf(stderr, "[DEBUG] Symbol %zu: %s, section_index=%u, value=0x%llX\n",
-                i, sym->name, sym->section_index, (unsigned long long)sym->value);
-#endif
-        for (size_t e = 0; e < num_entries; e++) {
-            if (strncmp(sym->name, entry_names[e], entry_name_lens[e]) == 0 &&
-                sym->name[entry_name_lens[e]] == '\0') {
-#ifdef ARKLINK_DEBUG
-                fprintf(stderr, "[DEBUG] Found entry symbol: %s, section_index=%u, value=0x%llX\n",
-                        sym->name, sym->section_index, (unsigned long long)sym->value);
-#endif
-                state->plan->entry_symbol = (uint32_t)i;
-                state->plan->entry_section = sym->section_index;
-                state->plan->entry_offset = sym->value;
-                return;
+            dst->data = (uint8_t*)malloc(src->size);
+            if (dst->data && src->data) {
+                memcpy(dst->data, src->data, src->size);
             }
-        }
-    }
-    
-    
-    if (state->unit_count > 0 && state->units[0]->entry_point != 0) {
-        
-        for (size_t i = 0; i < state->plan->symbol_count; i++) {
-            ArkResolverSymbol* sym = &state->plan->symbols[i];
-            if (sym->value == state->units[0]->entry_point && sym->section != NULL) {
-                state->plan->entry_symbol = (uint32_t)i;
-                state->plan->entry_section = sym->section_index;
-                state->plan->entry_offset = sym->value;
-                return;
-            }
-        }
-    }
-}
-
-
-static ArkLinkResult ark_resolver_build_backend_input(ArkResolverState* state) {
-    ArkBackendInput* input = (ArkBackendInput*)calloc(1, sizeof(ArkBackendInput));
-    if (!input) {
-        return ARK_LINK_ERR_INTERNAL;
-    }
-    state->plan->backend_input = input;
-    
-    
-    size_t section_total = 0;
-    for (size_t i = 0; i < state->unit_count; ++i) {
-        section_total += state->units[i]->section_count;
-    }
-    
-    if (section_total > 0) {
-        input->sections = (ArkBackendInputSection*)calloc(section_total, sizeof(ArkBackendInputSection));
-        if (!input->sections) {
-            return ARK_LINK_ERR_INTERNAL;
-        }
-        input->section_count = section_total;
-        
-        size_t cursor = 0;
-        for (size_t u = 0; u < state->unit_count; ++u) {
-            ArkLinkUnit* unit = state->units[u];
-            for (size_t s = 0; s < unit->section_count; ++s) {
-                ArkLinkSection* src = &unit->sections[s];
-                ArkBackendInputSection* dst = &input->sections[cursor];
-                dst->name = src->name;
-                dst->buffer = src->buffer;
-                dst->id = (uint32_t)cursor;
-                ++cursor;
-            }
-        }
-    }
-    
-    
-    if (state->plan->symbol_count > 0) {
-        input->symbols = (ArkBackendInputSymbol*)calloc(state->plan->symbol_count, sizeof(ArkBackendInputSymbol));
-        if (!input->symbols) {
-            return ARK_LINK_ERR_INTERNAL;
-        }
-        input->symbol_count = state->plan->symbol_count;
-        
-        for (size_t i = 0; i < state->plan->symbol_count; ++i) {
-            ArkResolverSymbol* src = &state->plan->symbols[i];
-            ArkBackendInputSymbol* dst = &input->symbols[i];
-            dst->name = src->name;
-            
-            dst->section_id = (src->section_index == 0) ? 0xFFFFFFFF : (src->section_index - 1);
-            dst->value = src->value;
             dst->size = src->size;
-            dst->binding = src->binding;
-            dst->visibility = src->visibility;
-            dst->import_id = src->import_id;
+            dst->capacity = src->size;
+            dst->kind = src->kind;
+            dst->flags = src->flags;
+            dst->alignment = src->alignment;
+
+            section_map[i][j] = (uint32_t)sec_idx;
+            sec_idx++;
         }
     }
+
+    out_plan->backend_input->section_count = total_sections;
     
+    out_plan->backend_input->entry_section = 1; 
+    out_plan->backend_input->entry_offset = 0;
     
-    if (state->plan->reloc_count > 0) {
-        input->relocs = (ArkBackendInputReloc*)calloc(state->plan->reloc_count, sizeof(ArkBackendInputReloc));
-        if (!input->relocs) {
-            return ARK_LINK_ERR_INTERNAL;
-        }
-        input->reloc_count = state->plan->reloc_count;
+    ArkResolverSymbol* entry_sym = find_symbol(&sym_table, "main");
+    if (!entry_sym) {
+        entry_sym = find_symbol(&sym_table, "_ZN4mainEv");
+    }
+    
+    if (entry_sym) {
         
-        for (size_t i = 0; i < state->plan->reloc_count; ++i) {
-            ArkResolverReloc* src = &state->plan->relocs[i];
-            ArkBackendInputReloc* dst = &input->relocs[i];
-            dst->section_id = src->section_index;
-            dst->offset = src->offset;
-            dst->type = src->type;
-            dst->addend = src->addend;
-            
-            
-            if (src->symbol && state->plan->symbols) {
-                dst->symbol_index = (uint32_t)(src->symbol - state->plan->symbols);
-            } else {
-                dst->symbol_index = 0;
+        out_plan->backend_input->entry_section = entry_sym->section_index + 1;
+        out_plan->backend_input->entry_offset = entry_sym->value;
+        fprintf(stderr, "[ArkLink] Entry point: symbol=%s, section=%u, offset=0x%x\n",
+                entry_sym->name, out_plan->backend_input->entry_section, out_plan->backend_input->entry_offset);
+    } else {
+        fprintf(stderr, "[ArkLink] Warning: No entry point symbol found (main or _ZN4mainEv), using default\n");
+    }
+
+    for (size_t i = 0; i < sym_table.symbol_count; i++) {
+        ArkResolverSymbol* sym = &sym_table.symbols[i];
+        if (sym->section_index >= 0 && sym->section_index < total_sections) {
+            sym->section = &out_plan->backend_input->sections[sym->section_index];
+        }
+    }
+
+    for (size_t i = 0; i < unit_count; i++) {
+        ArkLinkUnit* unit = units[i];
+        if (!unit) continue;
+
+        for (size_t j = 0; j < unit->section_count; j++) {
+            ArkLinkSection* sec = &unit->sections[j];
+            uint32_t global_sec_idx = section_map[i][j];
+
+            for (size_t k = 0; k < sec->reloc_count; k++) {
+                ArkRelocationDesc* reloc_desc = &sec->relocs[k];
+
+                ArkResolverReloc reloc = {0};
+                reloc.section = &out_plan->backend_input->sections[global_sec_idx];
+                reloc.section_index = global_sec_idx;
+                reloc.original_section_index = (uint32_t)j;
+                reloc.offset = (uint32_t)reloc_desc->offset;
+                reloc.type = reloc_desc->type;
+                reloc.addend = reloc_desc->addend;
+
+                if (reloc_desc->sym_idx < unit->symbol_count) {
+                    const char* sym_name = unit->symbols[reloc_desc->sym_idx].name;
+                    ArkResolverSymbol* global_sym = find_symbol(&sym_table, sym_name);
+                    if (global_sym) {
+                        reloc.symbol = global_sym;
+                        fprintf(stderr, "[ArkLink] Reloc: unit=%zu, local_sym_idx=%u, symbol_name=%s, section=%u\n",
+                                i, reloc_desc->sym_idx, 
+                                reloc.symbol->name ? reloc.symbol->name : "(null)",
+                                reloc.symbol->section_index);
+                    } else {
+                        fprintf(stderr, "[ArkLink] Reloc: unit=%zu, local_sym_idx=%u, symbol_name=%s NOT FOUND in global table\n",
+                                i, reloc_desc->sym_idx, sym_name ? sym_name : "(null)");
+                    }
+                } else {
+                    fprintf(stderr, "[ArkLink] Reloc: unit=%zu, local_sym_idx=%u OUT OF RANGE (unit symbol count=%zu)\n",
+                            i, reloc_desc->sym_idx, unit->symbol_count);
+                }
+
+                if (!reloc_table_add(&reloc_table, &reloc)) {
+                    for (size_t m = 0; m < unit_count; m++) {
+                        free(section_map[m]);
+                    }
+                    free(section_map);
+                    free(unit_sec_start);
+                    free(unit_sym_start);
+                    reloc_table_free(&reloc_table);
+                    free(out_plan->backend_input->sections);
+                    free(out_plan->backend_input);
+                    symbol_table_free(&sym_table);
+                    return ARK_LINK_ERR_MEMORY;
+                }
             }
         }
     }
-    
-    
-    if (state->plan->import_count > 0) {
-        input->imports = (ArkBackendInputImport*)calloc(state->plan->import_count, sizeof(ArkBackendInputImport));
-        if (!input->imports) {
-            return ARK_LINK_ERR_INTERNAL;
-        }
-        input->import_count = state->plan->import_count;
-        
-        for (size_t i = 0; i < state->plan->import_count; ++i) {
-            ArkImportBinding* src = &state->plan->imports[i];
-            ArkBackendInputImport* dst = &input->imports[i];
-            dst->module = src->module;
-            dst->symbol = src->symbol;
-            dst->slot = src->slot;
+
+    out_plan->relocs = reloc_table.relocs;
+    out_plan->reloc_count = reloc_table.reloc_count;
+
+    out_plan->backend_input->relocs = reloc_table.relocs;
+    out_plan->backend_input->reloc_count = reloc_table.reloc_count;
+    out_plan->backend_input->image_base = 0x140000000;
+
+    size_t import_count = 0;
+    for (size_t i = 0; i < sym_table.symbol_count; i++) {
+        if (sym_table.symbols[i].import_module) {
+            import_count++;
         }
     }
 
-    
-    if (state->plan->export_count > 0) {
-        input->exports = (ArkBackendInputExport*)calloc(state->plan->export_count, sizeof(ArkBackendInputExport));
-        if (!input->exports) {
-            return ARK_LINK_ERR_INTERNAL;
-        }
-        input->export_count = state->plan->export_count;
-
-        for (size_t i = 0; i < state->plan->export_count; ++i) {
-            ArkExportBinding* src = &state->plan->exports[i];
-            ArkBackendInputExport* dst = &input->exports[i];
-            dst->name = src->name;
-            dst->symbol_index = src->symbol_index;
-            dst->ordinal = src->ordinal;
+    if (import_count > 0) {
+        ArkImportEntry* imports = (ArkImportEntry*)calloc(import_count, sizeof(ArkImportEntry));
+        if (imports) {
+            size_t idx = 0;
+            for (size_t i = 0; i < sym_table.symbol_count; i++) {
+                if (sym_table.symbols[i].import_module) {
+                    imports[idx].module = strdup(sym_table.symbols[i].import_module);
+                    imports[idx].symbol = strdup(sym_table.symbols[i].name);
+                    imports[idx].iat_rva = 0;  
+                    idx++;
+                }
+            }
+            out_plan->backend_input->imports = imports;
+            out_plan->backend_input->import_count = import_count;
         }
     }
-    
-    
-    input->entry_section = state->plan->entry_section;
-    input->entry_offset = state->plan->entry_offset;
-    
+
+    for (size_t i = 0; i < unit_count; i++) {
+        free(section_map[i]);
+    }
+    free(section_map);
+    free(unit_sec_start);
+    free(unit_sym_start);
+
     return ARK_LINK_OK;
-}
-
-ArkLinkResult ark_resolver_resolve(ArkLinkContext* ctx, ArkLinkUnit* const* units, size_t unit_count, ArkResolverPlan* out_plan) {
-    if (!ctx || !units || !out_plan) {
-        return ARK_LINK_ERR_INVALID_ARGUMENT;
-    }
-    memset(out_plan, 0, sizeof(*out_plan));
-    
-    ArkResolverState state = {
-        .ctx = ctx,
-        .units = (ArkLinkUnit**)malloc(unit_count * sizeof(ArkLinkUnit*)),
-        .unit_count = unit_count,
-        .unit_capacity = unit_count,
-        .plan = out_plan,
-        .symtab = {NULL, 0},
-    };
-    memcpy(state.units, units, unit_count * sizeof(ArkLinkUnit*));
-    
-    
-    ArkLinkResult res = ark_resolver_collect_symbols(&state);
-    if (res != ARK_LINK_OK) {
-        ark_symtab_free(&state.symtab);
-        return res;
-    }
-    
-    
-    res = ark_resolver_check_undefined(&state);
-    if (res != ARK_LINK_OK) {
-        ark_symtab_free(&state.symtab);
-        return res;
-    }
-    
-    
-    res = ark_resolver_build_import_plan(&state);
-    if (res != ARK_LINK_OK) {
-        ark_symtab_free(&state.symtab);
-        return res;
-    }
-
-    
-    res = ark_resolver_collect_exports(&state);
-    if (res != ARK_LINK_OK) {
-        ark_symtab_free(&state.symtab);
-        return res;
-    }
-    
-    
-    res = ark_resolver_collect_relocs(&state);
-    if (res != ARK_LINK_OK) {
-        ark_symtab_free(&state.symtab);
-        return res;
-    }
-    
-    
-    ark_resolver_find_entry(&state);
-    
-    
-    res = ark_resolver_build_backend_input(&state);
-    
-    ark_symtab_free(&state.symtab);
-    free(state.units);
-    return res;
 }
 
 void ark_resolver_plan_destroy(ArkLinkContext* ctx, ArkResolverPlan* plan) {
-    (void)ctx;
-    if (!plan) {
-        return;
+    if (!plan) return;
+
+    if (plan->symbols) {
+        free(plan->symbols);
+        plan->symbols = NULL;
     }
-    if (plan->backend_input) {
-        free(plan->backend_input->sections);
-        free(plan->backend_input->symbols);
-        free(plan->backend_input->relocs);
+
+    if (plan->relocs) {
+        free(plan->relocs);
+        plan->relocs = NULL;
+    }
+
+    if (plan->import_modules) {
+        free(plan->import_modules);
+        plan->import_modules = NULL;
+    }
+
+    if (plan->imports) {
+        free(plan->imports);
+        plan->imports = NULL;
+    }
+
+    if (plan->backend_input && plan->backend_input->imports) {
+        for (size_t i = 0; i < plan->backend_input->import_count; i++) {
+            free((void*)plan->backend_input->imports[i].module);
+            free((void*)plan->backend_input->imports[i].symbol);
+        }
         free(plan->backend_input->imports);
-        free(plan->backend_input);
+        plan->backend_input->imports = NULL;
     }
-    free(plan->symbols);
-    free(plan->relocs);
-    free(plan->imports);
-    memset(plan, 0, sizeof(*plan));
+
+    if (plan->exports) {
+        free(plan->exports);
+        plan->exports = NULL;
+    }
+
+    if (plan->backend_input) {
+        
+        if (plan->backend_input->sections) {
+            for (size_t i = 0; i < plan->backend_input->section_count; i++) {
+                if (plan->backend_input->sections[i].data) {
+                    free(plan->backend_input->sections[i].data);
+                }
+            }
+            free(plan->backend_input->sections);
+        }
+        free(plan->backend_input);
+        plan->backend_input = NULL;
+    }
+
+    memset(plan, 0, sizeof(ArkResolverPlan));
 }

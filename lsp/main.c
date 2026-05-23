@@ -18,7 +18,7 @@ static void print_usage(const char* program) {
 }
 
 static void print_version(void) {
-    printf("E# Language Server v0.1.0\n");
+    printf("Kairote Lang Language Server v0.1.0\n");
     printf("Protocol version: %s\n", LSP_PROTOCOL_VERSION);
     printf("JSON-RPC version: %s\n", JSON_RPC_VERSION);
 }
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
     
     lsp_log_init(log_file, LSP_LOG_LEVEL_DEBUG);
     
-    LSP_LOG_INFO("E# Language Server starting...");
+    LSP_LOG_INFO("Kairote Lang Language Server starting...");
     
     LspServer* server = lsp_server_create();
     if (!server) {

@@ -3,7 +3,6 @@
 
 #include "context.h"
 
-
 struct ArkArchive;
 typedef struct ArkArchive ArkArchive;
 
@@ -22,19 +21,16 @@ typedef struct ArkLoaderOptions {
     int enable_strict_checks;
 } ArkLoaderOptions;
 
-
 typedef enum ArkSymbolBinding {
     ARK_BIND_LOCAL,
     ARK_BIND_GLOBAL,
     ARK_BIND_WEAK,
 } ArkSymbolBinding;
 
-
 typedef enum ArkSymbolVisibility {
     ARK_VISIBILITY_DEFAULT,
     ARK_VISIBILITY_HIDDEN,
 } ArkSymbolVisibility;
-
 
 typedef enum ArkSymbolType {
     ARK_SYM_NOTYPE,
@@ -42,18 +38,25 @@ typedef enum ArkSymbolType {
     ARK_SYM_OBJECT,
 } ArkSymbolType;
 
-
 typedef enum ArkRelocationType {
-    ARK_RELOC_ABS64,
-    ARK_RELOC_PC32,
-    ARK_RELOC_GOTPC32,
-    ARK_RELOC_SECREL32,
+    ARK_RELOC_ABS64 = 1,   
+    ARK_RELOC_ADDR32 = 2,  
+    ARK_RELOC_PC32 = 3,    
+    ARK_RELOC_GOTPC32 = 4,
+    ARK_RELOC_SECREL32 = 5,
 } ArkRelocationType;
-
 
 #define ARK_SECTION_READ  0x01
 #define ARK_SECTION_WRITE 0x02
 #define ARK_SECTION_EXEC  0x04
+
+typedef enum ArkSectionKind {
+    ARK_SECTION_UNKNOWN = 0,
+    ARK_SECTION_CODE = 1,
+    ARK_SECTION_DATA = 2,
+    ARK_SECTION_RODATA = 3,
+    ARK_SECTION_BSS = 4,
+} ArkSectionKind;
 
 typedef struct ArkSectionRange {
     uint32_t section_index;
@@ -77,6 +80,7 @@ typedef struct ArkSymbolDesc {
     uint8_t type;        
     uint8_t binding;     
     uint8_t visibility;  
+    const char* import_module;  
 } ArkSymbolDesc;
 
 typedef struct ArkLinkSectionDesc {
@@ -90,7 +94,6 @@ typedef struct ArkLinkRelocList {
     size_t count;
 } ArkLinkRelocList;
 
-
 struct ArkSectionBuffer;
 
 typedef struct ArkLinkSection {
@@ -99,6 +102,7 @@ typedef struct ArkLinkSection {
     size_t size;
     size_t alignment;
     uint32_t flags;
+    ArkSectionKind kind;
 
     ArkRelocationDesc* relocs;
     size_t reloc_count;
@@ -124,70 +128,24 @@ typedef struct ArkLinkUnit {
     ArkLinkRelocList relocations;
     uint64_t entry_point;
     
-    
     uint8_t* file_data;
     size_t file_size;
 } ArkLinkUnit;
-
 
 ArkLinkUnit* ark_link_unit_create(const char* path);
 void ark_link_unit_destroy(ArkLinkUnit* unit);
 ArkLinkSection* ark_link_unit_add_section(ArkLinkUnit* unit, const ArkSectionDesc* desc);
 int ark_link_unit_add_symbol(ArkLinkUnit* unit, const ArkSymbolDesc* desc);
 
-
 ArkLinkSection* ark_link_section_create(const char* name, const uint8_t* data, size_t size);
 int ark_link_section_add_reloc(ArkLinkSection* section, const ArkRelocationDesc* desc);
 
-
-ArkLinkResult ark_link_load_eo(const char* path, ArkLinkUnit** unit);
-
+ArkLinkResult ark_link_load_kro(const char* path, ArkLinkUnit** unit);
+ArkLinkResult ark_link_load_coff(const char* path, ArkLinkUnit** unit);
 
 int ark_link_unit_add_reloc(ArkLinkUnit* unit, const ArkRelocationDesc* desc);
 
-
 ArkLinkResult ark_loader_load_unit(ArkLinkContext* ctx, const char* path, const ArkLoaderOptions* opts, ArkLinkUnit** out_unit, ArkLoaderDiagnostics* diag);
-
-
-ArkLinkResult ark_loader_load_unit_memory(ArkLinkContext* ctx, const char* name, const void* data, size_t size, const ArkLoaderOptions* opts, ArkLinkUnit** out_unit, ArkLoaderDiagnostics* diag);
-
-void ark_loader_unit_destroy(ArkLinkContext* ctx, ArkLinkUnit* unit);
-
-
-
-
-
-
-ArkLinkResult ark_loader_load_archive(ArkLinkContext* ctx, const char* path, ArkArchive** out_archive, ArkLoaderDiagnostics* diag);
-
-
-size_t ark_archive_member_count(ArkArchive* archive);
-
-
-const char* ark_archive_member_name(ArkArchive* archive, size_t index);
-
-
-ArkLinkResult ark_archive_extract_unit(ArkLinkContext* ctx, ArkArchive* archive, size_t index, ArkLinkUnit** out_unit);
-
-
-ArkLinkResult ark_archive_extract_needed(ArkLinkContext* ctx, ArkArchive* archive,
-                                          const char* const* undefined_symbols, size_t undef_count,
-                                          ArkLinkUnit*** out_units, size_t* out_unit_count);
-
-
-ArkLinkResult ark_archive_list_symbols(ArkArchive* archive,
-                                        const char*** out_symbols, size_t* out_count);
-
-void ark_archive_destroy(ArkLinkContext* ctx, ArkArchive* archive);
-
-
-
-
-
-
-ArkLinkResult ark_loader_find_library(const char* name,
-                                       const char* const* search_paths, size_t path_count,
-                                       char* out_path, size_t out_path_size);
 
 #ifdef __cplusplus
 }

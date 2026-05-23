@@ -103,7 +103,6 @@ static void extract_symbols_from_ast(ASTNode* node, const char* uri, LspSymbolLi
             break;
     }
     
-    
 }
 
 LspSymbolList* lsp_document_symbols(const char* content, const char* uri) {
@@ -241,9 +240,6 @@ LspSymbolInfo* lsp_find_symbol_definition(const char* content, const char* symbo
     }
     
     LspSymbolInfo* result = NULL;
-    
-    
-    
     
     ast_destroy_node(ast);
     parser_destroy(parser);

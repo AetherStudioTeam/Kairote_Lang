@@ -93,16 +93,12 @@ LspSignatureHelp* lsp_get_signature_help(const char* content, int line, int col)
     help->active_signature = 0;
     help->active_parameter = 0;
     
-    
     Lexer* lexer = lexer_create(content);
     if (lexer) {
         Parser* parser = parser_create(lexer);
         if (parser) {
             ASTNode* ast = parser_parse(parser);
             if (ast) {
-                
-                
-                
                 
                 help->signatures[0].label = (char*)malloc(strlen(func_name) + 32);
                 if (help->signatures[0].label) {

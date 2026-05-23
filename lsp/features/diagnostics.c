@@ -9,7 +9,7 @@
 #include "../../../src/compiler/frontend/semantic/symbol_table.h"
 #include "../lsp_log.h"
 
-static const char* es_keywords[] = {
+static const char* KrtKeywords[] = {
     "function", "var", "if", "else", "while", "for", "foreach", "in",
     "return", "print", "true", "false", "and", "or", "not", "new", "delete",
     "class", "struct", "interface", "enum", "namespace", "this", "base",
@@ -22,8 +22,8 @@ static const char* es_keywords[] = {
 };
 
 static int is_keyword(const char* word) {
-    for (int i = 0; es_keywords[i]; i++) {
-        if (strcmp(es_keywords[i], word) == 0) return 1;
+    for (int i = 0; KrtKeywords[i]; i++) {
+        if (strcmp(KrtKeywords[i], word) == 0) return 1;
     }
     return 0;
 }
@@ -57,7 +57,7 @@ LspDiagnosticList* lsp_analyze_document(const char* uri, const char* content) {
             diag.end_line = token.line - 1;
             diag.end_char = token.column;
             diag.severity = LSP_SEVERITY_ERROR;
-            diag.source = strdup("E#");
+            diag.source = strdup("Kairote Lang");
             diag.message = strdup("Unknown token");
             lsp_diagnostic_list_add(list, &diag);
         }
@@ -69,7 +69,7 @@ LspDiagnosticList* lsp_analyze_document(const char* uri, const char* content) {
             diag.end_line = token.line - 1;
             diag.end_char = token.column + (int)strlen(token.value);
             diag.severity = LSP_SEVERITY_ERROR;
-            diag.source = strdup("E#");
+            diag.source = strdup("Kairote Lang");
             diag.message = strdup("Missing semicolon or operator between identifiers");
             lsp_diagnostic_list_add(list, &diag);
         }
@@ -100,14 +100,12 @@ LspDiagnosticList* lsp_analyze_document(const char* uri, const char* content) {
             diag.end_line = 0;
             diag.end_char = 1;
             diag.severity = LSP_SEVERITY_ERROR;
-            diag.source = strdup("E#");
+            diag.source = strdup("Kairote Lang");
             diag.message = strdup("Parse error");
             lsp_diagnostic_list_add(list, &diag);
         } else {
             SymbolTable* sym_table = symbol_table_create();
             if (sym_table) {
-                
-                
                 
                 int errors = symbol_table_get_error_count(sym_table);
                 if (errors > 0) {
@@ -134,13 +132,13 @@ LspCompletionList* lsp_get_completions(const char* content, int line, int col) {
     LspCompletionList* list = lsp_completion_list_create();
     if (!list) return NULL;
     
-    for (int i = 0; es_keywords[i]; i++) {
+    for (int i = 0; KrtKeywords[i]; i++) {
         LspCompletionItem item = {0};
-        item.label = strdup(es_keywords[i]);
+        item.label = strdup(KrtKeywords[i]);
         item.kind = LSP_COMPLETION_ITEM_KIND_KEYWORD;
-        item.insert_text = strdup(es_keywords[i]);
+        item.insert_text = strdup(KrtKeywords[i]);
         item.insert_text_format = LSP_INSERT_TEXT_FORMAT_PLAIN_TEXT;
-        item.detail = strdup("E# keyword");
+        item.detail = strdup("Kairote Lang keyword");
         lsp_completion_list_add(list, &item);
     }
     
@@ -247,7 +245,7 @@ char* lsp_get_hover_info(const char* content, int line, int col) {
     if (is_keyword(word)) {
         result = (char*)malloc(strlen(word) + 64);
         if (result) {
-            sprintf(result, "**%s**\n\nE# keyword", word);
+            sprintf(result, "**%s**\n\nKairote Lang keyword", word);
         }
     } else {
         Lexer* lexer = lexer_create(content);
@@ -350,9 +348,6 @@ LspLocation* lsp_get_definition(const char* content, int line, int col) {
         if (parser) {
             ASTNode* ast = parser_parse(parser);
             if (ast) {
-                
-                
-                
                 
                 ast_destroy_node(ast);
             }

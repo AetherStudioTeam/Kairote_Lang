@@ -83,18 +83,30 @@ int function_name(int param)
 ```
 
 ### 1.2 命名规范
+
+#### 1.2.1 公共接口命名（对外暴露的 API）
+- **函数命名**: 使用大驼峰命名法 (PascalCase)，以 `Krt` 为前缀
+  - 正确: `KrtParseExpression()`, `KrtCompileSource()`
+  - 错误: `parse_expression()`, `krt_parse_expression()`
+- **类型命名**: 使用大驼峰命名法，以 `Krt` 为前缀
+  - 正确: `KrtAstNode`, `KrtTokenType`
+  - 错误: `ast_node`, `krt_ast_node_t`
+
+#### 1.2.2 内部实现命名（模块内部使用）
 - **函数命名**: 使用下划线分隔的小写字母
-  - 正确: `parser_parse_expression()`
+  - 正确: `parser_parse_expression()`, `semantic_analyze()`
   - 错误: `parserParseExpression()`, `ParserParseExpression()`
 - **变量命名**: 使用下划线分隔的小写字母
   - 正确: `token_type`, `current_position`
   - 错误: `tokenType`, `currentPosition`
-- **类型命名**: 使用下划线分隔的小写字母
-  - 正确: `ast_node`, `token`
-  - 错误: `AstNode`, `TokenType`
-- **宏命名**: 使用全大写字母和下划线
-  - 正确: `MAX_TOKEN_LENGTH`, `TOKEN_TYPE_KEYWORD`
-  - 错误: `maxTokenLength`, `TokenTypeKeyword`
+- **类型命名**: 使用下划线分隔的小写字母，以 `_t` 后缀
+  - 正确: `ast_node_t`, `token_t`
+  - 错误: `AstNode`, `ast_node`
+
+#### 1.2.3 宏命名
+- **宏命名**: 使用全大写字母和下划线，以 `KRT_` 为前缀
+  - 正确: `KRT_MAX_TOKEN_LENGTH`, `KRT_TOKEN_TYPE_KEYWORD`
+  - 错误: `MAX_TOKEN_LENGTH`, `krt_max_token_length`
 
 ### 1.3 注释规范
 - **最小化注释**: 代码应该自解释，只在必要时添加注释（如：复杂算法添加注释等）
@@ -113,8 +125,8 @@ int function_name(int param)
 ### 2.1 测试文件规范
 - **位置**: 所有测试文件必须放在 `Test/` 目录下
 - **命名**: 使用 `test_` 前缀，描述性名称
-  - 正确: `Test/test_console_simple.ktr`
-  - 错误: `test_console_simple.ktr` (放在根目录)
+  - 正确: `Test/test_console_simple.krt`
+  - 错误: `test_console_simple.krt` (放在根目录)
 - **分类**: 按功能分类放置
   - 语法测试: `Test/syntax/`
   - 功能测试: `Test/features/`
@@ -138,19 +150,19 @@ int function_name(int param)
 ```c
 // 运行时错误码 (src/runtime/runtime.h)
 typedef enum {
-    ES_ERR_NONE = 0,
-    ES_ERR_OUT_OF_MEMORY,
-    ES_ERR_INVALID_ARGUMENT,
-    ES_ERR_FILE_NOT_FOUND,
-    ES_ERR_PERMISSION_DENIED,
-    ES_ERR_IO_ERROR,
-    ES_ERR_NETWORK_ERROR,
-    ES_ERR_INDEX_OUT_OF_BOUNDS,
-    ES_ERR_DIVISION_BY_ZERO,
-    ES_ERR_NULL_POINTER,
-    ES_ERR_BUFFER_OVERFLOW,
-    ES_ERR_UNKNOWN
-} ES_ErrorCode;
+    KRT_ERR_NONE = 0,
+    KRT_ERR_OUT_OF_MEMORY,
+    KRT_ERR_INVALID_ARGUMENT,
+    KRT_ERR_FILE_NOT_FOUND,
+    KRT_ERR_PERMISSION_DENIED,
+    KRT_ERR_IO_ERROR,
+    KRT_ERR_NETWORK_ERROR,
+    KRT_ERR_INDEX_OUT_OF_BOUNDS,
+    KRT_ERR_DIVISION_BY_ZERO,
+    KRT_ERR_NULL_POINTER,
+    KRT_ERR_BUFFER_OVERFLOW,
+    KRT_ERR_UNKNOWN
+} KrtErrorCode;
 ```
 
 #### 3.2.2 编译时错误处理
@@ -164,104 +176,72 @@ Kairote编译器使用自定义的错误输出格式，不是传统的C语言编
 
 **基本错误格式**:
 ```
-[ES_ERROR] 错误描述信息
+[KrtError] 错误描述信息
 ```
 
 **带位置的错误格式**:
 ```
-[ES_ERROR] 文件名:行号: 错误描述信息
+[KrtError] 文件名:行号: 错误描述信息
 ```
 
 **编译错误格式**（致命错误，会终止编译）:
 ```
-[ES_COMPILE_ERROR] 错误描述信息
+[KRT_COMPILE_ERROR] 错误描述信息
 ```
 
 **带位置的编译错误格式**:
 ```
-[ES_COMPILE_ERROR] 文件名:行号: 错误描述信息
+[KRT_COMPILE_ERROR] 文件名:行号: 错误描述信息
 ```
 
 **警告信息格式**:
 ```
-[ES_WARNING] 警告描述信息
-[ES_WARNING] 文件名:行号: 警告描述信息
+[KRT_WARNING] 警告描述信息
+[KRT_WARNING] 文件名:行号: 警告描述信息
 ```
 
-#### 3.2.4 错误报告宏定义
+#### 3.2.4 错误报告宏使用
+
+错误报告宏定义在 `src/core/utils/krt_common.h` 中，使用方法如下：
+
 ```c
-// 基础错误报告宏 (src/core/utils/es_common.h)
-#define ES_ERROR(fmt, ...) do { \
-    extern int es_output_cache_is_enabled(void); \
-    extern void es_output_cache_add_error(const char* format, ...); \
-    if (es_output_cache_is_enabled()) { \
-        es_output_cache_add_error("[ES_ERROR] " fmt "\n", ##__VA_ARGS__); \
-    } else { \
-        fprintf(stderr, "[ES_ERROR] " fmt "\n", ##__VA_ARGS__); \
-        fflush(stderr); \
-    } \
-} while(0)
+// 基础错误报告
+KrtError("错误描述信息");
+KrtError("变量 %s 未定义", var_name);
 
 // 带位置的错误报告
-#define ES_ERROR_LOC(file, line, fmt, ...) do { \
-    extern int es_output_cache_is_enabled(void); \
-    extern void es_output_cache_add_error(const char* format, ...); \
-    if (es_output_cache_is_enabled()) { \
-        es_output_cache_add_error("[ES_ERROR] %s:%d: " fmt "\n", file, line, ##__VA_ARGS__); \
-    } else { \
-        fprintf(stderr, "[ES_ERROR] %s:%d: " fmt "\n", file, line, ##__VA_ARGS__); \
-        fflush(stderr); \
-    } \
-} while(0)
+KrtError_LOC(file, line, "语法错误: 意外的token");
 
 // 编译错误（致命错误，会终止程序）
-#define ES_COMPILE_ERROR(fmt, ...) do { \
-    fprintf(stderr, "[ES_COMPILE_ERROR] " fmt "\n", ##__VA_ARGS__); \
-    fflush(stderr); \
-    exit(1); \
-} while(0)
-
-// 带位置的编译错误
-#define ES_COMPILE_ERROR_LOC(file, line, fmt, ...) do { \
-    fprintf(stderr, "[ES_COMPILE_ERROR] %s:%d: " fmt "\n", file, line, ##__VA_ARGS__); \
-    fflush(stderr); \
-    exit(1); \
-} while(0)
+KRT_COMPILE_ERROR("无法打开文件: %s", filename);
+KRT_COMPILE_ERROR_LOC(file, line, "内部编译器错误");
 
 // 警告信息
-#define ES_WARNING(fmt, ...) do { \
-    extern int es_output_cache_is_enabled(void); \
-    extern void es_output_cache_add_error(const char* format, ...); \
-    if (es_output_cache_is_enabled()) { \
-        es_output_cache_add_error("[ES_WARNING] " fmt "\n", ##__VA_ARGS__); \
-    } else { \
-        fprintf(stderr, "[ES_WARNING] " fmt "\n", ##__VA_ARGS__); \
-        fflush(stderr); \
-    } \
-} while(0)
+KRT_WARNING("未使用的变量: %s", var_name);
+KRT_WARNING_LOC(file, line, "隐式类型转换");
 ```
 
 #### 3.2.5 运行时错误处理
 ```c
 // 运行时错误码 (src/runtime/runtime.h)
 typedef enum {
-    ES_ERR_NONE = 0,
-    ES_ERR_OUT_OF_MEMORY,
-    ES_ERR_INVALID_ARGUMENT,
-    ES_ERR_FILE_NOT_FOUND,
-    ES_ERR_PERMISSION_DENIED,
-    ES_ERR_IO_ERROR,
-    ES_ERR_NETWORK_ERROR,
-    ES_ERR_INDEX_OUT_OF_BOUNDS,
-    ES_ERR_DIVISION_BY_ZERO,
-    ES_ERR_NULL_POINTER,
-    ES_ERR_BUFFER_OVERFLOW,
-    ES_ERR_UNKNOWN
-} ES_ErrorCode;
+    KRT_ERR_NONE = 0,
+    KRT_ERR_OUT_OF_MEMORY,
+    KRT_ERR_INVALID_ARGUMENT,
+    KRT_ERR_FILE_NOT_FOUND,
+    KRT_ERR_PERMISSION_DENIED,
+    KRT_ERR_IO_ERROR,
+    KRT_ERR_NETWORK_ERROR,
+    KRT_ERR_INDEX_OUT_OF_BOUNDS,
+    KRT_ERR_DIVISION_BY_ZERO,
+    KRT_ERR_NULL_POINTER,
+    KRT_ERR_BUFFER_OVERFLOW,
+    KRT_ERR_UNKNOWN
+} KrtErrorCode;
 
 // 运行时错误函数
-void es_error(ES_ErrorCode code);
-const char* es_strerror(ES_ErrorCode code);
+void KrtError(KrtErrorCode code);
+const char* KrtStrerror(KrtErrorCode code);
 ```
 
 #### 3.2.6 内存错误处理
@@ -270,10 +250,10 @@ const char* es_strerror(ES_ErrorCode code);
 - **双重释放**: 使用智能指针防止 (src/core/memory/smart_ptr.c)
 
 #### 3.2.7 错误处理最佳实践
-1. **编译期错误**: 使用 `ES_ERROR` 或 `ES_ERROR_LOC` 报告非致命错误
-2. **致命错误**: 使用 `ES_COMPILE_ERROR` 或 `ES_COMPILE_ERROR_LOC` 报告致命错误并终止编译
-3. **警告信息**: 使用 `ES_WARNING` 或 `ES_WARNING_LOC` 报告警告信息
-4. **运行时错误**: 使用 `es_error()` 设置运行时错误码，用 `es_strerror()` 获取错误描述
+1. **编译期错误**: 使用 `KrtError` 或 `KrtError_LOC` 报告非致命错误
+2. **致命错误**: 使用 `KRT_COMPILE_ERROR` 或 `KRT_COMPILE_ERROR_LOC` 报告致命错误并终止编译
+3. **警告信息**: 使用 `KRT_WARNING` 或 `KRT_WARNING_LOC` 报告警告信息
+4. **运行时错误**: 使用 `KrtError()` 设置运行时错误码，用 `KrtStrerror()` 获取错误描述
 
 ### 3.3 AST和中间表示规范
 
@@ -281,28 +261,28 @@ const char* es_strerror(ES_ErrorCode code);
 ```c
 // AST节点类型枚举 (src/compiler/frontend/parser/ast.h)
 typedef enum {
-    AST_PROGRAM,
-    AST_FUNCTION_DECLARATION,
-    AST_VARIABLE_DECLARATION,
-    AST_ASSIGNMENT,
-    AST_BINARY_OPERATION,
-    AST_UNARY_OPERATION,
-    AST_IF_STATEMENT,
-    AST_WHILE_STATEMENT,
-    AST_FOR_STATEMENT,
-    AST_RETURN_STATEMENT,
-    AST_CALL,
-    AST_IDENTIFIER,
-    AST_NUMBER,
-    AST_STRING,
+    KRT_AST_PROGRAM,
+    KRT_AST_FUNCTION_DECLARATION,
+    KRT_AST_VARIABLE_DECLARATION,
+    KRT_AST_ASSIGNMENT,
+    KRT_AST_BINARY_OPERATION,
+    KRT_AST_UNARY_OPERATION,
+    KRT_AST_IF_STATEMENT,
+    KRT_AST_WHILE_STATEMENT,
+    KRT_AST_FOR_STATEMENT,
+    KRT_AST_RETURN_STATEMENT,
+    KRT_AST_CALL,
+    KRT_AST_IDENTIFIER,
+    KRT_AST_NUMBER,
+    KRT_AST_STRING,
     // ... 更多节点类型
-} AstNodeType;
+} KrtAstNodeType;
 ```
 
 #### 3.3.2 AST节点结构
 ```c
-typedef struct ast_node_t {
-    AstNodeType type;
+typedef struct krt_ast_node_t {
+    KrtAstNodeType type;
     int line;
     int column;
     union {
@@ -311,10 +291,10 @@ typedef struct ast_node_t {
         struct { /* 二元运算数据 */ } binary_op;
         // ... 其他节点数据
     } data;
-    struct ast_node_t* parent;
-    struct ast_node_t** children;
+    struct krt_ast_node_t* parent;
+    struct krt_ast_node_t** children;
     size_t child_count;
-} ast_node_t;
+} krt_ast_node_t;
 ```
 
 #### 3.3.3 中间表示(IR)规范
@@ -322,39 +302,39 @@ typedef struct ast_node_t {
 // IR指令类型 (src/compiler/middle/ir/ir.h)
 typedef enum {
     // 内存操作
-    ES_IR_LOAD,
-    ES_IR_STORE,
-    ES_IR_ALLOC,
+    KRT_IR_LOAD,
+    KRT_IR_STORE,
+    KRT_IR_ALLOC,
     
     // 算术运算
-    ES_IR_ADD,
-    ES_IR_SUB,
-    ES_IR_MUL,
-    ES_IR_DIV,
+    KRT_IR_ADD,
+    KRT_IR_SUB,
+    KRT_IR_MUL,
+    KRT_IR_DIV,
     
     // 控制流
-    ES_IR_JUMP,
-    ES_IR_BRANCH,
-    ES_IR_RETURN,
+    KRT_IR_JUMP,
+    KRT_IR_BRANCH,
+    KRT_IR_RETURN,
     
     // 函数调用
-    ES_IR_CALL,
-    ES_IR_PARAM,
+    KRT_IR_CALL,
+    KRT_IR_PARAM,
     
     // ... 更多IR指令
-} EsIROpcode;
+} KrtIROpcode;
 ```
 
 #### 3.3.4 IR值类型
 ```c
 typedef enum {
-    ES_IR_VALUE_VOID,
-    ES_IR_VALUE_IMM,          // 立即数
-    ES_IR_VALUE_VAR,          // 变量
-    ES_IR_VALUE_TEMP,         // 临时变量
-    ES_IR_VALUE_ARG,          // 函数参数
-    ES_IR_VALUE_STRING_CONST, // 字符串常量
-} EsIRValueType;
+    KRT_IR_VALUE_VOID,
+    KRT_IR_VALUE_IMM,          // 立即数
+    KRT_IR_VALUE_VAR,          // 变量
+    KRT_IR_VALUE_TEMP,         // 临时变量
+    KRT_IR_VALUE_ARG,          // 函数参数
+    KRT_IR_VALUE_STRING_CONST, // 字符串常量
+} KrtIRValueType;
 ```
 
 #### 3.3.5 IR优化规则

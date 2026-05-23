@@ -1,83 +1,63 @@
 #ifndef ARKLINK_BACKEND_H
 #define ARKLINK_BACKEND_H
 
-#include "ArkLink/context.h"
-#include "ArkLink/loader.h"
+#include "context.h"
+#include "resolver.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct ArkBackendInputSection {
-    const char* name;
-    const ArkSectionBuffer* buffer;
-    uint32_t id;
-} ArkBackendInputSection;
-
-typedef struct ArkBackendInputSymbol {
-    const char* name;
-    uint32_t section_id;
-    uint32_t value;
-    uint32_t size;
-    ArkSymbolBinding binding;
-    ArkSymbolVisibility visibility;
-    int32_t import_id;
-    int is_export;          
-} ArkBackendInputSymbol;
-
-typedef struct ArkBackendInputReloc {
-    uint32_t section_id;
-    uint32_t offset;
-    uint32_t type;
-    uint32_t symbol_index;
-    int32_t addend;
-} ArkBackendInputReloc;
-
-typedef struct ArkBackendInputImport {
+typedef struct ArkImportEntry {
     const char* module;
     const char* symbol;
-    uint32_t slot;
-} ArkBackendInputImport;
+    uint32_t iat_rva;
+} ArkImportEntry;
 
-typedef struct ArkBackendInputExport {
+typedef struct ArkExportEntry {
     const char* name;
-    uint32_t symbol_index;
     uint32_t ordinal;
-} ArkBackendInputExport;
+    uint32_t section_index;
+    uint32_t offset;
+    uint64_t value;
+    int is_function;
+} ArkExportEntry;
 
 typedef struct ArkBackendInput {
-    ArkBackendInputSection* sections;
+    ArkSectionBuffer* sections;
     size_t section_count;
-    ArkBackendInputSymbol* symbols;
-    size_t symbol_count;
-    ArkBackendInputReloc* relocs;
-    size_t reloc_count;
-    ArkBackendInputImport* imports;
-    size_t import_count;
-    ArkBackendInputExport* exports;
-    size_t export_count;
+    uint64_t entry_point;
     uint32_t entry_section;
     uint32_t entry_offset;
-    ArkLinkOutputKind output_kind;
-
-    
-    ArkSubsystem subsystem;
+    ArkImportEntry* imports;
+    size_t import_count;
+    ArkExportEntry* exports;
+    size_t export_count;
+    const char* export_name;
+    uint32_t export_ordinal_base;
+    ArkResolverReloc* relocs;
+    size_t reloc_count;
     uint64_t image_base;
-    uint64_t stack_size;
-    const char* entry_point_name;
 } ArkBackendInput;
 
-typedef struct ArkBackendState ArkBackendState;
+typedef struct ArkSectionRvaMap {
+    uint32_t rva;
+    uint32_t size;
+    uint32_t file_offset;
+    uint32_t flags;
+} ArkSectionRvaMap;
 
-typedef struct ArkBackendOps {
-    ArkLinkTarget target;
-    ArkLinkResult (*prepare)(ArkLinkContext* ctx, ArkBackendInput* input, ArkBackendState** out_state);
-    ArkLinkResult (*write_output)(ArkBackendState* state, const char* output_path);
-    void (*destroy_state)(ArkBackendState* state);
-} ArkBackendOps;
+typedef struct ArkBackendOutput {
+    uint8_t* data;
+    size_t size;
+    ArkSectionRvaMap* section_maps;
+    size_t section_count;
+    uint64_t image_base;
+} ArkBackendOutput;
 
-const ArkBackendOps* ark_backend_query(ArkLinkTarget target);
-void ark_backend_register(const ArkBackendOps* ops);
+typedef ArkLinkResult (*ArkBackendLinkFn)(ArkLinkContext* ctx, ArkBackendInput* input, ArkBackendOutput* output);
+
+ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, ArkBackendOutput* output);
 
 #ifdef __cplusplus
 }
