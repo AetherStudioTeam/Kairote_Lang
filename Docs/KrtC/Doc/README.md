@@ -4,22 +4,22 @@
 
 ## 文档导航
 
-### 📚 语言规范
+### 语言规范
 - [语言规范文档](Spec/Lang_Spec.md) - Kairote Lang语言的完整语法和语义规范
 
-### 🔧 API参考
+### API参考
 - [API参考文档](Api/Api_Reference.md) - Kairote Lang运行时库的完整API参考
 
-### 👥 用户指南
+### 用户指南
 - [用户手册](Guide/user_manual.md) - Kairote Lang语言的使用指南和教程
 
-### 🛠️ 开发者指南
+### 开发者指南
 - [开发者指南](Guide/Dev_Guide.md) - Kairote Lang编译器开发和贡献指南
 
-### 📖 示例和教程
+### 示例和教程
 - [示例和教程](Examples/Tut&Examples.md) - Kairote Lang语言的示例代码和教程
 
-### 📝 开发文档
+### 开发文档
 - [开发任务](../DEV-DOC/todo.md) - Kairote Lang开发团队的待办事项和任务列表
 
 ## 快速开始
