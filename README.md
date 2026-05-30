@@ -238,7 +238,7 @@ Kairote_Lang/
 | 渠道 | 链接 |
 |------|------|
 | 邮箱 | [?@?.?](?@?.?) |
-| QQ 群 | [791809691](https://jq.qq.com/?_wv=1027&k=791809691) |
+| QQ 群 | [791809691](https://jq.qq.com/?_wv=1027&k=193021037) |
 | GitHub | [https://github.com/KairoteStudio_Lang](https://github.com/KairoteStudio/Kairote_Lang) |
 </div>
 
