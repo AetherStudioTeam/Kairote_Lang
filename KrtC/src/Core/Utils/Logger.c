@@ -125,3 +125,16 @@ int KrtFprintf(FILE* stream, const char* format, ...) {
 
     return result;
 }
+
+int KrtPrintf(const char* format, ...) {
+    if (!format) {
+        return -1;
+    }
+
+    va_list args;
+    va_start(args, format);
+    int result = vfprintf(stdout, format, args);
+    va_end(args);
+    fflush(stdout);
+    return result;
+}

@@ -438,6 +438,7 @@ KRT_RUNTIME_EXPORT char* KRT_API _KrtStrcat(const char* str1, const char* str2) 
     return result;
 }
 
+#ifdef _WIN32
 static ULONGLONG g_timer_start_ticks_dbl = 0;
 static ULONGLONG g_timer_start_ticks_int = 0;
 
@@ -476,6 +477,7 @@ KRT_RUNTIME_EXPORT long long KRT_API timer_elapsed_int(void) {
 KRT_RUNTIME_EXPORT long long KRT_API timer_current_int(void) {
     return (long long)GetTickCount64();
 }
+#endif
 
 KRT_RUNTIME_EXPORT void KRT_API KrtPrint(const char* str) {
     _print_string(str);
@@ -1419,7 +1421,7 @@ KRT_RUNTIME_EXPORT int KRT_API KrtConnect(KrtSocketHandle socket, const char* ad
         
         struct hostent* host = gethostbyname(address);
         if (!host) return -1;
-        memcpy(&server_addr.sin_addr, host->h_addr, host->h_length);
+        memcpy(&server_addr.sin_addr, host->h_addr_list[0], host->h_length);
     }
     
     return connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == 0 ? 0 : -1;
@@ -2041,4 +2043,596 @@ uint64_t get_free_memory(void) {
     }
     return 0;
 #endif
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtIsInstance(void* obj, const char* typeName) {
+    if (!obj || !typeName) return 0;
+    
+    void** vtable = (void**)obj;
+    if (!vtable || !*vtable) return 0;
+    
+    char** typeNamePtr = (char**)(*vtable);
+    if (!typeNamePtr || !*typeNamePtr) return 0;
+    
+    return KrtStrcmp(*typeNamePtr, typeName) == 0;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtAsInstance(void* obj, const char* typeName) {
+    if (!obj || !typeName) return NULL;
+    
+    if (KrtIsInstance(obj, typeName)) {
+        return obj;
+    }
+    
+    return NULL;
+}
+
+static KrtMutex g_monitor_mutex = NULL;
+
+KRT_RUNTIME_EXPORT void KRT_API Monitor_Enter(void* obj) {
+    if (!obj) return;
+    
+    if (!g_monitor_mutex) {
+        g_monitor_mutex = KrtMutexCreateFunc();
+    }
+    
+    KrtMutexLockFunc(g_monitor_mutex);
+}
+
+KRT_RUNTIME_EXPORT void KRT_API Monitor_Exit(void* obj) {
+    if (!obj) return;
+    
+    if (g_monitor_mutex) {
+        KrtMutexUnlockFunc(g_monitor_mutex);
+    }
+}
+
+KRT_RUNTIME_EXPORT void KRT_API Dispose(void* obj) {
+    if (!obj) return;
+    
+    void** vtable = (void**)obj;
+    if (vtable && *vtable) {
+        void (*disposeFunc)(void*) = (void (*)(void*))((void**)*vtable)[1];
+        if (disposeFunc) {
+            disposeFunc(obj);
+        }
+    }
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtNullCoalesce(void* left, void* right) {
+    if (left != NULL) {
+        return left;
+    }
+    return right;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtNullConditional(void* obj, const char* memberName) {
+    if (!obj || !memberName) return NULL;
+    
+    void** vtable = (void**)obj;
+    if (!vtable || !*vtable) return NULL;
+    
+    return obj;
+}
+
+// Thread-local storage for current exception
+#ifdef _WIN32
+static __declspec(thread) void* g_current_exception = NULL;
+#else
+static __thread void* g_current_exception = NULL;
+#endif
+
+KRT_RUNTIME_EXPORT void KRT_API KrtThrowException(void* exception) {
+    g_current_exception = exception;
+    // In a real implementation, this would unwind the stack
+    // For now, we just store the exception
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtRethrowException(void) {
+    // Rethrow the current exception
+    // The exception is already in g_current_exception
+    // In a real implementation, this would continue unwinding
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtGetCurrentException(void) {
+    return g_current_exception;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtSetCurrentException(void* exception) {
+    g_current_exception = exception;
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtCastToInt32(double value) {
+    return (int)value;
+}
+
+KRT_RUNTIME_EXPORT long long KRT_API KrtCastToInt64(double value) {
+    return (long long)value;
+}
+
+KRT_RUNTIME_EXPORT float KRT_API KrtCastToFloat32(double value) {
+    return (float)value;
+}
+
+KRT_RUNTIME_EXPORT double KRT_API KrtCastToFloat64(double value) {
+    return value;
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtCastToBool(double value) {
+    return value != 0.0 ? 1 : 0;
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtCastToString(double value) {
+    char* result = (char*)KrtMalloc(32);
+    if (result) {
+        snprintf(result, 32, "%g", value);
+    }
+    return result;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtOrderBy(void* array, int count, size_t element_size, KrtCompareFunc compare) {
+    if (!array || count <= 1 || !compare) return;
+    qsort(array, (size_t)count, element_size, compare);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtCompareInt32Asc(const void* a, const void* b) {
+    int32_t av = *(const int32_t*)a;
+    int32_t bv = *(const int32_t*)b;
+    return (av > bv) - (av < bv);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtCompareInt32Desc(const void* a, const void* b) {
+    int32_t av = *(const int32_t*)a;
+    int32_t bv = *(const int32_t*)b;
+    return (bv > av) - (bv < av);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtCompareFloat64Asc(const void* a, const void* b) {
+    double av = *(const double*)a;
+    double bv = *(const double*)b;
+    return (av > bv) - (av < bv);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtCompareFloat64Desc(const void* a, const void* b) {
+    double av = *(const double*)a;
+    double bv = *(const double*)b;
+    return (bv > av) - (bv < av);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfInt32(void) {
+    return sizeof(int32_t);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfInt64(void) {
+    return sizeof(int64_t);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfFloat32(void) {
+    return sizeof(float);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfFloat64(void) {
+    return sizeof(double);
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfPointer(void) {
+    return sizeof(void*);
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtStringConcat(const char* s1, const char* s2) {
+    if (!s1 && !s2) return NULL;
+    if (!s1) return KRT_STRDUP(s2);
+    if (!s2) return KRT_STRDUP(s1);
+    
+    size_t len1 = strlen(s1);
+    size_t len2 = strlen(s2);
+    char* result = (char*)KRT_MALLOC(len1 + len2 + 1);
+    if (!result) return NULL;
+    
+    strcpy(result, s1);
+    strcat(result, s2);
+    return result;
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtInt32ToString(int32_t value) {
+    char* result = (char*)KRT_MALLOC(16);
+    if (!result) return NULL;
+    KRT_SPRINTF_S(result, 16, "%d", value);
+    return result;
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtInt64ToString(int64_t value) {
+    char* result = (char*)KRT_MALLOC(32);
+    if (!result) return NULL;
+    KRT_SPRINTF_S(result, 32, "%lld", (long long)value);
+    return result;
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtFloat32ToString(float value) {
+    char* result = (char*)KRT_MALLOC(32);
+    if (!result) return NULL;
+    KRT_SPRINTF_S(result, 32, "%g", value);
+    return result;
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtFloat64ToString(double value) {
+    char* result = (char*)KRT_MALLOC(32);
+    if (!result) return NULL;
+    KRT_SPRINTF_S(result, 32, "%g", value);
+    return result;
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtBoolToString(int value) {
+    return KRT_STRDUP(value ? "True" : "False");
+}
+
+KRT_RUNTIME_EXPORT char* KRT_API KrtPointerToString(void* value) {
+    char* result = (char*)KRT_MALLOC(32);
+    if (!result) return NULL;
+    KRT_SPRINTF_S(result, 32, "%p", value);
+    return result;
+}
+
+// Tuple implementation
+KRT_RUNTIME_EXPORT void* KRT_API KrtCreateTuple(int element_count) {
+    if (element_count <= 0) return NULL;
+    
+    // Allocate array of void* for tuple elements
+    void** tuple = (void**)KRT_MALLOC(element_count * sizeof(void*));
+    if (!tuple) return NULL;
+    
+    // Initialize all elements to NULL
+    for (int i = 0; i < element_count; i++) {
+        tuple[i] = NULL;
+    }
+    
+    return tuple;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtTupleSetElement(void* tuple, int index, void* value) {
+    if (!tuple || index < 0) return;
+    
+    void** elements = (void**)tuple;
+    elements[index] = value;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtTupleGetElement(void* tuple, int index) {
+    if (!tuple || index < 0) return NULL;
+    
+    void** elements = (void**)tuple;
+    return elements[index];
+}
+
+// ============================================================================
+// Pointer and Memory Operations
+// ============================================================================
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtGetVariableAddress(const char* var_name) {
+    // This is a placeholder - in real implementation would need
+    // access to variable storage. For now returns NULL.
+    (void)var_name;
+    return NULL;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtLoadPtr(void* base, int offset) {
+    if (!base) return NULL;
+    char* ptr = (char*)base;
+    return *(void**)(ptr + offset);
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtStorePtr(void* base, int offset, void* value) {
+    if (!base) return;
+    char* ptr = (char*)base;
+    *(void**)(ptr + offset) = value;
+}
+
+// Stack allocation (using malloc for now - real implementation would use actual stack)
+KRT_RUNTIME_EXPORT void* KRT_API KrtStackAlloc(int size) {
+    if (size <= 0) return NULL;
+    // In a real implementation, this would allocate from the stack
+    // For now, we use malloc
+    return KrtMalloc((size_t)size);
+}
+
+// Object pinning for fixed statements
+static void** g_pinned_objects = NULL;
+static int g_pinned_count = 0;
+static int g_pinned_capacity = 0;
+
+KRT_RUNTIME_EXPORT void KRT_API KrtPinObject(void* obj) {
+    if (!obj) return;
+    
+    if (!g_pinned_objects) {
+        g_pinned_capacity = 16;
+        g_pinned_objects = (void**)KrtMalloc(sizeof(void*) * g_pinned_capacity);
+        if (!g_pinned_objects) return;
+    }
+    
+    if (g_pinned_count >= g_pinned_capacity) {
+        int new_capacity = g_pinned_capacity * 2;
+        void** new_array = (void**)KrtRealloc(g_pinned_objects, sizeof(void*) * new_capacity);
+        if (!new_array) return;
+        g_pinned_objects = new_array;
+        g_pinned_capacity = new_capacity;
+    }
+    
+    g_pinned_objects[g_pinned_count++] = obj;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtUnpinObject(void* obj) {
+    if (!obj || !g_pinned_objects) return;
+    
+    for (int i = 0; i < g_pinned_count; i++) {
+        if (g_pinned_objects[i] == obj) {
+            // Remove by shifting
+            for (int j = i; j < g_pinned_count - 1; j++) {
+                g_pinned_objects[j] = g_pinned_objects[j + 1];
+            }
+            g_pinned_count--;
+            return;
+        }
+    }
+}
+
+// ============================================================================
+// Async/Await Support
+// ============================================================================
+
+typedef struct KrtTask {
+    int state;
+    void* result;
+    void (*continuation)(void*);
+    void* continuation_arg;
+    int is_completed;
+} KrtTask;
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtCreateTask(void) {
+    KrtTask* task = (KrtTask*)KrtMalloc(sizeof(KrtTask));
+    if (!task) return NULL;
+    task->state = 0;
+    task->result = NULL;
+    task->continuation = NULL;
+    task->continuation_arg = NULL;
+    task->is_completed = 0;
+    return task;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtCompleteTask(void* task_handle, void* result) {
+    if (!task_handle) return;
+    KrtTask* task = (KrtTask*)task_handle;
+    task->result = result;
+    task->is_completed = 1;
+    if (task->continuation) {
+        task->continuation(task->continuation_arg);
+    }
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtAwaitTask(void* task_handle) {
+    if (!task_handle) return NULL;
+    KrtTask* task = (KrtTask*)task_handle;
+    
+    // In a real implementation, this would yield control
+    // For now, we just wait (busy wait - not ideal but works for basic cases)
+    while (!task->is_completed) {
+        // Yield or sleep
+        KrtSleepMs(1);
+    }
+    
+    return task->result;
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtTaskIsCompleted(void* task_handle) {
+    if (!task_handle) return 0;
+    KrtTask* task = (KrtTask*)task_handle;
+    return task->is_completed;
+}
+
+// ============================================================================
+// LINQ Support Functions
+// ============================================================================
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtLinqWhere(void* source, void* predicate) {
+    // Placeholder - would filter elements based on predicate
+    (void)predicate;
+    return source;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtLinqOrderBy(void* source, int ascending, void* key_selector) {
+    // Placeholder - would sort elements
+    (void)ascending;
+    (void)key_selector;
+    return source;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtLinqGroupBy(void* source, void* key, void* element, const char* into_var) {
+    // Placeholder - would group elements
+    (void)key;
+    (void)element;
+    (void)into_var;
+    return source;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtLinqSelect(void* source, void* selector) {
+    // Placeholder - would project elements
+    (void)selector;
+    return source;
+}
+
+// ============================================================================
+// Delegate Support
+// ============================================================================
+
+typedef struct KrtDelegate {
+    void* target;
+    void* method_ptr;
+    char* method_name;
+} KrtDelegate;
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtCreateDelegate(void* target, void* method_ptr, const char* method_name) {
+    KrtDelegate* delegate = (KrtDelegate*)KrtMalloc(sizeof(KrtDelegate));
+    if (!delegate) return NULL;
+    
+    delegate->target = target;
+    delegate->method_ptr = method_ptr;
+    delegate->method_name = method_name ? KrtStrdup(method_name) : NULL;
+    
+    return delegate;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtInvokeDelegate(void* delegate_handle, void** args, int arg_count) {
+    if (!delegate_handle) return NULL;
+    KrtDelegate* delegate = (KrtDelegate*)delegate_handle;
+    
+    if (!delegate->method_ptr) return NULL;
+    
+    // In a real implementation, this would call the method
+    // For now, just return NULL
+    (void)args;
+    (void)arg_count;
+    return NULL;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtFreeDelegate(void* delegate_handle) {
+    if (!delegate_handle) return;
+    KrtDelegate* delegate = (KrtDelegate*)delegate_handle;
+    if (delegate->method_name) {
+        KrtFree(delegate->method_name);
+    }
+    KrtFree(delegate);
+}
+
+// ============================================================================
+// Generic Static Field Support
+// ============================================================================
+
+// Hash table for generic static fields
+#define GENERIC_STATIC_TABLE_SIZE 256
+
+typedef struct GenericStaticEntry {
+    char* key;
+    void* value;
+    struct GenericStaticEntry* next;
+} GenericStaticEntry;
+
+static GenericStaticEntry* g_generic_static_table[GENERIC_STATIC_TABLE_SIZE] = {NULL};
+
+static unsigned int hash_string(const char* str) {
+    unsigned int hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c;
+    }
+    return hash % GENERIC_STATIC_TABLE_SIZE;
+}
+
+KRT_RUNTIME_EXPORT void* KRT_API KrtGetGenericStaticField(const char* mangled_name) {
+    if (!mangled_name) return NULL;
+    
+    unsigned int hash = hash_string(mangled_name);
+    GenericStaticEntry* entry = g_generic_static_table[hash];
+    
+    while (entry) {
+        if (strcmp(entry->key, mangled_name) == 0) {
+            return entry->value;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtSetGenericStaticField(const char* mangled_name, void* value) {
+    if (!mangled_name) return;
+    
+    unsigned int hash = hash_string(mangled_name);
+    GenericStaticEntry* entry = g_generic_static_table[hash];
+    
+    // Check if entry already exists
+    while (entry) {
+        if (strcmp(entry->key, mangled_name) == 0) {
+            entry->value = value;
+            return;
+        }
+        entry = entry->next;
+    }
+    
+    // Create new entry
+    entry = (GenericStaticEntry*)KrtMalloc(sizeof(GenericStaticEntry));
+    if (!entry) return;
+    
+    entry->key = KrtStrdup(mangled_name);
+    entry->value = value;
+    entry->next = g_generic_static_table[hash];
+    g_generic_static_table[hash] = entry;
+}
+
+KRT_RUNTIME_EXPORT void KRT_API KrtClearGenericStaticFields(void) {
+    for (int i = 0; i < GENERIC_STATIC_TABLE_SIZE; i++) {
+        GenericStaticEntry* entry = g_generic_static_table[i];
+        while (entry) {
+            GenericStaticEntry* next = entry->next;
+            if (entry->key) KrtFree(entry->key);
+            KrtFree(entry);
+            entry = next;
+        }
+        g_generic_static_table[i] = NULL;
+    }
+}
+
+// ============================================================================
+// Generic Constraint Support
+// ============================================================================
+
+// Type metadata structure for constraint checking
+typedef struct KrtTypeMetadata {
+    char* type_name;
+    int is_class;
+    int is_struct;
+    int is_interface;
+    char** interfaces;
+    int interface_count;
+    char* base_class;
+} KrtTypeMetadata;
+
+static KrtTypeMetadata** g_type_metadata = NULL;
+static int g_type_metadata_count = 0;
+static int g_type_metadata_capacity = 0;
+
+KRT_RUNTIME_EXPORT int KRT_API KrtIsClass(void* obj) {
+    if (!obj) return 0;
+    // In a full implementation, this would check the object's type metadata
+    // For now, assume all non-null pointers are reference types
+    return 1;
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtIsStruct(void* obj) {
+    if (!obj) return 0;
+    // Value types would be handled differently
+    return 0;
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtImplementsInterface(void* obj, const char* interface_name) {
+    if (!obj || !interface_name) return 0;
+    // In a full implementation, this would check the type's interface table
+    return 0;
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtInheritsFrom(void* obj, const char* base_class_name) {
+    if (!obj || !base_class_name) return 0;
+    // In a full implementation, this would walk the inheritance hierarchy
+    return 0;
+}
+
+KRT_RUNTIME_EXPORT int KRT_API KrtCheckGenericConstraint(void* obj, const char* constraint_type) {
+    if (!obj || !constraint_type) return 0;
+    
+    if (strcmp(constraint_type, "class") == 0) {
+        return KrtIsClass(obj);
+    } else if (strcmp(constraint_type, "struct") == 0) {
+        return KrtIsStruct(obj);
+    } else {
+        // Check for interface or base class constraint
+        if (KrtImplementsInterface(obj, constraint_type)) return 1;
+        if (KrtInheritsFrom(obj, constraint_type)) return 1;
+    }
+    return 0;
 }

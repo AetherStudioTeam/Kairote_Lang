@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "../../Core/Utils/KrtString.h"
-#include "../../Core/Utils/path.h"
+#include "../../Core/Utils/Path.h"
 #include "ArkLinkIntegration.h"
 
 extern void *memset(void *s, int c, size_t n);
@@ -201,7 +201,7 @@ int ParallelCompilerExecute(ParallelCompiler* compiler) {
 
     thread_pool_wait(compiler->thread_pool);
 
-    double total_duration = KrtTimeNowSeconds() - total_start_time;
+    (void)(KrtTimeNowSeconds() - total_start_time);
 
     pthread_mutex_lock(&compiler->result_mutex);
     for (int i = 0; i < compiler->task_count; i++) {

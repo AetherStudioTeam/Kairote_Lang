@@ -1,0 +1,707 @@
+namespace System.Collections.Generic
+
+public class List<T>
+{
+    private var items: T[]
+    private var count: int32
+    private var capacity: int32
+
+    public function List()
+    {
+        this.capacity = 4
+        this.items = new T[this.capacity]
+        this.count = 0
+    }
+
+    public function List(capacity: int32)
+    {
+        if capacity < 0
+        {
+            throw new ArgumentOutOfRangeException("capacity")
+        }
+        this.capacity = capacity
+        if capacity == 0
+        {
+            this.items = new T[0]
+        }
+        else
+        {
+            this.items = new T[capacity]
+        }
+        this.count = 0
+    }
+
+    public function List(collection: IEnumerable<T>)
+    {
+        this.capacity = 4
+        this.items = new T[this.capacity]
+        this.count = 0
+        for var item in collection
+        {
+            this.Add(item)
+        }
+    }
+
+    public function get_Count(): int32
+    {
+        return this.count
+    }
+
+    public function get_Capacity(): int32
+    {
+        return this.capacity
+    }
+
+    public function set_Capacity(value: int32)
+    {
+        if value < this.count
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        if value != this.capacity
+        {
+            var newItems = new T[value]
+            for var i = 0; i < this.count; i = i + 1
+            {
+                newItems[i] = this.items[i]
+            }
+            this.items = newItems
+            this.capacity = value
+        }
+    }
+
+    public function get_Item(index: int32): T
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        return this.items[index]
+    }
+
+    public function set_Item(index: int32, value: T)
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        this.items[index] = value
+    }
+
+    public function Add(item: T)
+    {
+        if this.count == this.capacity
+        {
+            this.EnsureCapacity(this.count + 1)
+        }
+        this.items[this.count] = item
+        this.count = this.count + 1
+    }
+
+    public function AddRange(collection: IEnumerable<T>)
+    {
+        for var item in collection
+        {
+            this.Add(item)
+        }
+    }
+
+    public function Insert(index: int32, item: T)
+    {
+        if index < 0 || index > this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if this.count == this.capacity
+        {
+            this.EnsureCapacity(this.count + 1)
+        }
+        for var i = this.count; i > index; i = i - 1
+        {
+            this.items[i] = this.items[i - 1]
+        }
+        this.items[index] = item
+        this.count = this.count + 1
+    }
+
+    public function InsertRange(index: int32, collection: IEnumerable<T>)
+    {
+        if index < 0 || index > this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        for var item in collection
+        {
+            this.Insert(index, item)
+            index = index + 1
+        }
+    }
+
+    public function Remove(item: T): bool
+    {
+        var index = this.IndexOf(item)
+        if index >= 0
+        {
+            this.RemoveAt(index)
+            return true
+        }
+        return false
+    }
+
+    public function RemoveAll(match: Predicate<T>): int32
+    {
+        var count = 0
+        var i = 0
+        while i < this.count
+        {
+            if match(this.items[i])
+            {
+                this.RemoveAt(i)
+                count = count + 1
+            }
+            else
+            {
+                i = i + 1
+            }
+        }
+        return count
+    }
+
+    public function RemoveAt(index: int32)
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        for var i = index; i < this.count - 1; i = i + 1
+        {
+            this.items[i] = this.items[i + 1]
+        }
+        this.items[this.count - 1] = default(T)
+        this.count = this.count - 1
+    }
+
+    public function RemoveRange(index: int32, count: int32)
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if count < 0 || index + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        for var i = 0; i < count; i = i + 1
+        {
+            this.RemoveAt(index)
+        }
+    }
+
+    public function Clear()
+    {
+        for var i = 0; i < this.count; i = i + 1
+        {
+            this.items[i] = default(T)
+        }
+        this.count = 0
+    }
+
+    public function Contains(item: T): bool
+    {
+        return this.IndexOf(item) >= 0
+    }
+
+    public function IndexOf(item: T): int32
+    {
+        return this.IndexOf(item, 0)
+    }
+
+    public function IndexOf(item: T, startIndex: int32): int32
+    {
+        return this.IndexOf(item, startIndex, this.count - startIndex)
+    }
+
+    public function IndexOf(item: T, startIndex: int32, count: int32): int32
+    {
+        if startIndex < 0 || startIndex > this.count
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if count < 0 || startIndex + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        for var i = startIndex; i < startIndex + count; i = i + 1
+        {
+            if this.items[i] == item
+            {
+                return i
+            }
+        }
+        return -1
+    }
+
+    public function LastIndexOf(item: T): int32
+    {
+        return this.LastIndexOf(item, this.count - 1)
+    }
+
+    public function LastIndexOf(item: T, startIndex: int32): int32
+    {
+        return this.LastIndexOf(item, startIndex, startIndex + 1)
+    }
+
+    public function LastIndexOf(item: T, startIndex: int32, count: int32): int32
+    {
+        if startIndex < 0 || startIndex >= this.count
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if count < 0 || startIndex - count + 1 < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        var endIndex = startIndex - count + 1
+        for var i = startIndex; i >= endIndex; i = i - 1
+        {
+            if this.items[i] == item
+            {
+                return i
+            }
+        }
+        return -1
+    }
+
+    public function Find(match: Predicate<T>): T
+    {
+        for var i = 0; i < this.count; i = i + 1
+        {
+            if match(this.items[i])
+            {
+                return this.items[i]
+            }
+        }
+        return default(T)
+    }
+
+    public function FindAll(match: Predicate<T>): List<T>
+    {
+        var result = new List<T>()
+        for var i = 0; i < this.count; i = i + 1
+        {
+            if match(this.items[i])
+            {
+                result.Add(this.items[i])
+            }
+        }
+        return result
+    }
+
+    public function FindIndex(match: Predicate<T>): int32
+    {
+        return this.FindIndex(0, this.count, match)
+    }
+
+    public function FindIndex(startIndex: int32, match: Predicate<T>): int32
+    {
+        return this.FindIndex(startIndex, this.count - startIndex, match)
+    }
+
+    public function FindIndex(startIndex: int32, count: int32, match: Predicate<T>): int32
+    {
+        if startIndex < 0 || startIndex > this.count
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if count < 0 || startIndex + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        for var i = startIndex; i < startIndex + count; i = i + 1
+        {
+            if match(this.items[i])
+            {
+                return i
+            }
+        }
+        return -1
+    }
+
+    public function FindLast(match: Predicate<T>): T
+    {
+        for var i = this.count - 1; i >= 0; i = i - 1
+        {
+            if match(this.items[i])
+            {
+                return this.items[i]
+            }
+        }
+        return default(T)
+    }
+
+    public function FindLastIndex(match: Predicate<T>): int32
+    {
+        return this.FindLastIndex(this.count - 1, this.count, match)
+    }
+
+    public function FindLastIndex(startIndex: int32, match: Predicate<T>): int32
+    {
+        return this.FindLastIndex(startIndex, startIndex + 1, match)
+    }
+
+    public function FindLastIndex(startIndex: int32, count: int32, match: Predicate<T>): int32
+    {
+        if startIndex < 0 || startIndex >= this.count
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if count < 0 || startIndex - count + 1 < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        var endIndex = startIndex - count + 1
+        for var i = startIndex; i >= endIndex; i = i - 1
+        {
+            if match(this.items[i])
+            {
+                return i
+            }
+        }
+        return -1
+    }
+
+    public function Exists(match: Predicate<T>): bool
+    {
+        return this.FindIndex(match) >= 0
+    }
+
+    public function TrueForAll(match: Predicate<T>): bool
+    {
+        for var i = 0; i < this.count; i = i + 1
+        {
+            if !match(this.items[i])
+            {
+                return false
+            }
+        }
+        return true
+    }
+
+    public function ForEach(action: Action<T>)
+    {
+        for var i = 0; i < this.count; i = i + 1
+        {
+            action(this.items[i])
+        }
+    }
+
+    public function ConvertAll<TOutput>(converter: Converter<T, TOutput>): List<TOutput>
+    {
+        var result = new List<TOutput>(this.count)
+        for var i = 0; i < this.count; i = i + 1
+        {
+            result.Add(converter(this.items[i]))
+        }
+        return result
+    }
+
+    public function CopyTo(array: T[])
+    {
+        this.CopyTo(array, 0)
+    }
+
+    public function CopyTo(array: T[], arrayIndex: int32)
+    {
+        if array == null
+        {
+            throw new ArgumentNullException("array")
+        }
+        if arrayIndex < 0 || arrayIndex > array.Length
+        {
+            throw new ArgumentOutOfRangeException("arrayIndex")
+        }
+        if array.Length - arrayIndex < this.count
+        {
+            throw new ArgumentException("Destination array is not long enough")
+        }
+        for var i = 0; i < this.count; i = i + 1
+        {
+            array[arrayIndex + i] = this.items[i]
+        }
+    }
+
+    public function CopyTo(index: int32, array: T[], arrayIndex: int32, count: int32)
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if array == null
+        {
+            throw new ArgumentNullException("array")
+        }
+        if arrayIndex < 0 || arrayIndex > array.Length
+        {
+            throw new ArgumentOutOfRangeException("arrayIndex")
+        }
+        if count < 0 || index + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if array.Length - arrayIndex < count
+        {
+            throw new ArgumentException("Destination array is not long enough")
+        }
+        for var i = 0; i < count; i = i + 1
+        {
+            array[arrayIndex + i] = this.items[index + i]
+        }
+    }
+
+    public function GetRange(index: int32, count: int32): List<T>
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if count < 0 || index + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        var result = new List<T>(count)
+        for var i = 0; i < count; i = i + 1
+        {
+            result.Add(this.items[index + i])
+        }
+        return result
+    }
+
+    public function Reverse()
+    {
+        this.Reverse(0, this.count)
+    }
+
+    public function Reverse(index: int32, count: int32)
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if count < 0 || index + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        var left = index
+        var right = index + count - 1
+        while left < right
+        {
+            var temp = this.items[left]
+            this.items[left] = this.items[right]
+            this.items[right] = temp
+            left = left + 1
+            right = right - 1
+        }
+    }
+
+    public function Sort()
+    {
+        this.Sort(0, this.count, null)
+    }
+
+    public function Sort(comparer: IComparer<T>)
+    {
+        this.Sort(0, this.count, comparer)
+    }
+
+    public function Sort(index: int32, count: int32, comparer: IComparer<T>)
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if count < 0 || index + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        this.QuickSort(index, index + count - 1, comparer)
+    }
+
+    private function QuickSort(left: int32, right: int32, comparer: IComparer<T>)
+    {
+        if left < right
+        {
+            var pivot = this.Partition(left, right, comparer)
+            this.QuickSort(left, pivot - 1, comparer)
+            this.QuickSort(pivot + 1, right, comparer)
+        }
+    }
+
+    private function Partition(left: int32, right: int32, comparer: IComparer<T>): int32
+    {
+        var pivot = this.items[right]
+        var i = left - 1
+        for var j = left; j < right; j = j + 1
+        {
+            var comparison = 0
+            if comparer != null
+            {
+                comparison = comparer.Compare(this.items[j], pivot)
+            }
+            else
+            {
+                comparison = this.CompareItems(this.items[j], pivot)
+            }
+            if comparison <= 0
+            {
+                i = i + 1
+                var temp = this.items[i]
+                this.items[i] = this.items[j]
+                this.items[j] = temp
+            }
+        }
+        var temp2 = this.items[i + 1]
+        this.items[i + 1] = this.items[right]
+        this.items[right] = temp2
+        return i + 1
+    }
+
+    private function CompareItems(a: T, b: T): int32
+    {
+        if a < b
+        {
+            return -1
+        }
+        if a > b
+        {
+            return 1
+        }
+        return 0
+    }
+
+    public function BinarySearch(item: T): int32
+    {
+        return this.BinarySearch(0, this.count, item, null)
+    }
+
+    public function BinarySearch(item: T, comparer: IComparer<T>): int32
+    {
+        return this.BinarySearch(0, this.count, item, comparer)
+    }
+
+    public function BinarySearch(index: int32, count: int32, item: T, comparer: IComparer<T>): int32
+    {
+        if index < 0 || index >= this.count
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if count < 0 || index + count > this.count
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        var left = index
+        var right = index + count - 1
+        while left <= right
+        {
+            var mid = left + (right - left) / 2
+            var comparison = 0
+            if comparer != null
+            {
+                comparison = comparer.Compare(this.items[mid], item)
+            }
+            else
+            {
+                comparison = this.CompareItems(this.items[mid], item)
+            }
+            if comparison == 0
+            {
+                return mid
+            }
+            if comparison < 0
+            {
+                left = mid + 1
+            }
+            else
+            {
+                right = mid - 1
+            }
+        }
+        return ~left
+    }
+
+    public function ToArray(): T[]
+    {
+        var result = new T[this.count]
+        for var i = 0; i < this.count; i = i + 1
+        {
+            result[i] = this.items[i]
+        }
+        return result
+    }
+
+    public function TrimExcess()
+    {
+        if this.count < this.capacity * 0.9
+        {
+            this.Capacity = this.count
+        }
+    }
+
+    private function EnsureCapacity(min: int32)
+    {
+        if this.capacity < min
+        {
+            var newCapacity = this.capacity * 2
+            if newCapacity < min
+            {
+                newCapacity = min
+            }
+            this.Capacity = newCapacity
+        }
+    }
+
+    public function GetEnumerator(): IEnumerator<T>
+    {
+        return new ListEnumerator<T>(this)
+    }
+}
+
+public class ListEnumerator<T> : IEnumerator<T>
+{
+    private var list: List<T>
+    private var index: int32
+    private var current: T
+
+    public function ListEnumerator(list: List<T>)
+    {
+        this.list = list
+        this.index = 0
+        this.current = default(T)
+    }
+
+    public function MoveNext(): bool
+    {
+        if this.index < this.list.Count
+        {
+            this.current = this.list.get_Item(this.index)
+            this.index = this.index + 1
+            return true
+        }
+        this.current = default(T)
+        return false
+    }
+
+    public function Reset()
+    {
+        this.index = 0
+        this.current = default(T)
+    }
+
+    public function get_Current(): T
+    {
+        return this.current
+    }
+
+    public function Dispose()
+    {
+    }
+}

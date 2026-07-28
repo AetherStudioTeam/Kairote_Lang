@@ -348,26 +348,31 @@ static void emit_jump(Emitter* em, const char* label) {
 
 static void emit_call(Emitter* em, const char* func_name, KrtIRValue* args, int arg_count, KrtIRValue* result) {
     
+#ifdef __linux__
+    const char* arg_regs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+#else
     const char* arg_regs[] = {"rcx", "rdx", "r8", "r9"};
-    
+#endif
+    int arg_reg_count = sizeof(arg_regs) / sizeof(arg_regs[0]);
+
     int need_save_r10_r11 = 0;
-    for (int i = 0; i < arg_count && i < 4; i++) {
+    for (int i = 0; i < arg_count && i < arg_reg_count; i++) {
         if (args[i].type == KRT_IR_VALUE_TEMP || args[i].type == KRT_IR_VALUE_VAR) {
-            
+
             need_save_r10_r11 = 1;
             break;
         }
     }
-    
+
+    for (int i = 0; i < arg_count && i < arg_reg_count; i++) {
+        emit_load_value(em, &args[i], arg_regs[i]);
+    }
+
     if (need_save_r10_r11) {
         fprintf(em->output, "    push r10\n");
         fprintf(em->output, "    push r11\n");
     }
-    
-    for (int i = 0; i < arg_count && i < 4; i++) {
-        emit_load_value(em, &args[i], arg_regs[i]);
-    }
-    
+
     const char* actual_func_name = func_name;
     if (strcmp(func_name, "print_string") == 0) {
         actual_func_name = "_print_string";
@@ -407,27 +412,6 @@ static void emit_array_store(Emitter* em, KrtIRInst* inst) {
     emit_load_value(em, value, "rax");
 
     fprintf(em->output, "    mov [rcx + rdx*8], rax\n");
-}
-
-static void emit_array_load(Emitter* em, KrtIRInst* inst) {
-    if (inst->operand_count < 2) return;
-
-    KrtIRValue* arr = &inst->operands[0];
-    KrtIRValue* index = &inst->operands[1];
-
-    emit_load_value(em, arr, "rcx");
-
-    emit_load_value(em, index, "rdx");
-
-    fprintf(em->output, "    mov rax, [rcx + rdx*8]\n");
-
-    emit_store_result(em, &inst->result, "rax");
-}
-
-static void emit_basic_block(Emitter* em, KrtIRBasicBlock* block);
-
-static void get_prefixed_label(Emitter* em, const char* label, char* out_buf, size_t buf_size) {
-    snprintf(out_buf, buf_size, "%s_%s", em->ctx->current_func->name, label);
 }
 
 static void emit_instruction(Emitter* em, KrtIRInst* inst) {
@@ -500,9 +484,16 @@ static void emit_instruction(Emitter* em, KrtIRInst* inst) {
             }
             break;
             
+        case KRT_IR_IMM:
+            if (inst->operand_count >= 1) {
+                emit_load_value(em, &inst->operands[0], "rax");
+                emit_store_result(em, &inst->result, "rax");
+            }
+            break;
+
         case KRT_IR_ALLOC:
         case KRT_IR_NOP:
-            
+
             break;
             
         case KRT_IR_ARRAY_STORE:
@@ -510,8 +501,12 @@ static void emit_instruction(Emitter* em, KrtIRInst* inst) {
             break;
             
         case KRT_IR_LOADPTR:
-            
-            if (inst->operand_count >= 1) {
+            if (inst->operand_count >= 2) {
+                emit_load_value(em, &inst->operands[0], "rcx");
+                int offset = (int)inst->operands[1].data.imm;
+                fprintf(em->output, "    mov rax, [rcx + %d]\n", offset);
+                emit_store_result(em, &inst->result, "rax");
+            } else if (inst->operand_count >= 1) {
                 emit_load_value(em, &inst->operands[0], "rcx");
                 fprintf(em->output, "    mov rax, [rcx]\n");
                 emit_store_result(em, &inst->result, "rax");
@@ -519,37 +514,46 @@ static void emit_instruction(Emitter* em, KrtIRInst* inst) {
             break;
 
         case KRT_IR_STOREPTR:
-            
-            if (inst->operand_count >= 2) {
-                emit_load_value(em, &inst->operands[0], "rcx");  
-                emit_load_value(em, &inst->operands[1], "rax");  
-                fprintf(em->output, "    mov [rcx], rax\n");
+            if (inst->operand_count >= 3) {
+                emit_load_value(em, &inst->operands[0], "rcx");
+                emit_load_value(em, &inst->operands[2], "rax");
+                int offset = (int)inst->operands[1].data.imm;
+                fprintf(em->output, "    mov [rcx + %d], rax\n", offset);
             }
             break;
             
         case KRT_IR_STRCAT:
-            
+
             if (inst->operand_count >= 2) {
-                emit_load_value(em, &inst->operands[0], "rcx");  
-                emit_load_value(em, &inst->operands[1], "rdx");  
-                fprintf(em->output, "    call KrtStrcat\n");
+#ifdef __linux__
+                emit_load_value(em, &inst->operands[0], "rdi");
+                emit_load_value(em, &inst->operands[1], "rsi");
+#else
+                emit_load_value(em, &inst->operands[0], "rcx");
+                emit_load_value(em, &inst->operands[1], "rdx");
+#endif
+                fprintf(em->output, "    call KrtStringConcat\n");
                 emit_store_result(em, &inst->result, "rax");
             }
             break;
-            
+
         case KRT_IR_INT_TO_STRING:
-            
+
             if (inst->operand_count >= 1) {
-                emit_load_value(em, &inst->operands[0], "rcx");  
+#ifdef __linux__
+                emit_load_value(em, &inst->operands[0], "rdi");
+#else
+                emit_load_value(em, &inst->operands[0], "rcx");
+#endif
                 fprintf(em->output, "    call KrtIntToString\n");
                 emit_store_result(em, &inst->result, "rax");
             }
             break;
-            
+
         case KRT_IR_DOUBLE_TO_STRING:
-            
+
             if (inst->operand_count >= 1) {
-                
+
                 fprintf(em->output, "    call KrtDoubleToString\n");
                 emit_store_result(em, &inst->result, "rax");
             }
@@ -667,9 +671,14 @@ static void emit_function_prologue(FILE* output, CodegenContext* ctx) {
 
     fprintf(output, "    sub rsp, %d\n", ctx->stack_size);
 
+#ifdef __linux__
+    static const char* arg_regs[] = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+#else
     static const char* arg_regs[] = {"rcx", "rdx", "r8", "r9"};
-    for (int i = 0; i < ctx->current_func->param_count && i < 4; i++) {
-        
+#endif
+    int arg_reg_count = sizeof(arg_regs) / sizeof(arg_regs[0]);
+    for (int i = 0; i < ctx->current_func->param_count && i < arg_reg_count; i++) {
+
         if (ctx->current_func->params && ctx->current_func->params[i].name) {
             const char* param_name = ctx->current_func->params[i].name;
             int offset = codegen_get_var_offset(ctx, param_name);
@@ -704,7 +713,8 @@ static void emit_function(FILE* output, KrtIRFunction* func, KrtIRModule* module
 
     Emitter em = {output, &ctx};
 
-    fprintf(output, "\n; Function: %s\n", func->name);
+    fprintf(output, "\nglobal %s\n", func->name);
+    fprintf(output, "; Function: %s\n", func->name);
     fprintf(output, "%s:\n", func->name);
 
     emit_function_prologue(output, &ctx);
@@ -764,8 +774,7 @@ void KrtX86Generate(FILE* output, KrtIRModule* module) {
     }
     fprintf(output, "\n");
 
-    fprintf(output, "section .text\n");
-    fprintf(output, "global main\n\n");
+    fprintf(output, "section .text\n\n");
 
     fprintf(output, "extern exit\n");
     fprintf(output, "extern _print_int\n");
@@ -789,7 +798,57 @@ void KrtX86Generate(FILE* output, KrtIRModule* module) {
     fprintf(output, "extern timer_elapsed\n");
     fprintf(output, "extern timer_elapsed_int\n");
     fprintf(output, "extern timer_current\n");
-    fprintf(output, "extern timer_current_int\n\n");
+    fprintf(output, "extern timer_current_int\n");
+    fprintf(output, "extern KrtIsInstance\n");
+    fprintf(output, "extern KrtAsInstance\n");
+    fprintf(output, "extern KrtNullCoalesce\n");
+    fprintf(output, "extern KrtNullConditional\n");
+    fprintf(output, "extern KrtCastToInt32\n");
+    fprintf(output, "extern KrtCastToInt64\n");
+    fprintf(output, "extern KrtCastToFloat32\n");
+    fprintf(output, "extern KrtCastToFloat64\n");
+    fprintf(output, "extern KrtCastToBool\n");
+    fprintf(output, "extern KrtCastToString\n");
+    fprintf(output, "extern KrtSizeOfInt32\n");
+    fprintf(output, "extern KrtSizeOfInt64\n");
+    fprintf(output, "extern KrtSizeOfFloat32\n");
+    fprintf(output, "extern KrtSizeOfFloat64\n");
+    fprintf(output, "extern KrtSizeOfPointer\n");
+    fprintf(output, "extern KrtStringConcat\n");
+    fprintf(output, "extern KrtInt32ToString\n");
+    fprintf(output, "extern KrtInt64ToString\n");
+    fprintf(output, "extern KrtFloat32ToString\n");
+    fprintf(output, "extern KrtFloat64ToString\n");
+    fprintf(output, "extern KrtBoolToString\n");
+    fprintf(output, "extern KrtCreateTuple\n");
+    fprintf(output, "extern KrtTupleSetElement\n");
+    fprintf(output, "extern KrtTupleGetElement\n");
+    fprintf(output, "extern KrtLoadPtr\n");
+    fprintf(output, "extern KrtStorePtr\n");
+    fprintf(output, "extern KrtStackAlloc\n");
+    fprintf(output, "extern KrtPinObject\n");
+    fprintf(output, "extern KrtUnpinObject\n");
+    fprintf(output, "extern KrtAwaitTask\n");
+    fprintf(output, "extern KrtCreateTask\n");
+    fprintf(output, "extern KrtCompleteTask\n");
+    fprintf(output, "extern KrtLinqWhere\n");
+    fprintf(output, "extern KrtLinqOrderBy\n");
+    fprintf(output, "extern KrtLinqGroupBy\n");
+    fprintf(output, "extern KrtLinqSelect\n");
+    fprintf(output, "extern KrtCreateDelegate\n");
+    fprintf(output, "extern KrtInvokeDelegate\n");
+    fprintf(output, "extern Monitor_Enter\n");
+    fprintf(output, "extern Monitor_Exit\n");
+    fprintf(output, "extern KrtThrowException\n");
+    fprintf(output, "extern KrtRethrowException\n");
+    fprintf(output, "extern KrtGetGenericStaticField\n");
+    fprintf(output, "extern KrtSetGenericStaticField\n");
+    fprintf(output, "extern KrtClearGenericStaticFields\n");
+    fprintf(output, "extern KrtIsClass\n");
+    fprintf(output, "extern KrtIsStruct\n");
+    fprintf(output, "extern KrtImplementsInterface\n");
+    fprintf(output, "extern KrtInheritsFrom\n");
+    fprintf(output, "extern KrtCheckGenericConstraint\n\n");
 
     KrtIRFunction* func = module->functions;
     int func_count = 0;

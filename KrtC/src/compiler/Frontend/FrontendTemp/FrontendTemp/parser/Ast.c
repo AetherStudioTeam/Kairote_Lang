@@ -9,21 +9,6 @@
 
 extern void* memset(void* s, int c, size_t n);
 
-static char* alloc_string(const char* str, KrtArena* arena) {
-    if (!str) return NULL;
-    
-    size_t len = strlen(str) + 1;
-    if (arena) {
-        char* result = (char*)KrtArenaAlloc(arena, len);
-        if (result) {
-            memcpy(result, str, len);
-        }
-        return result;
-    } else {
-        return (char*)KRT_MALLOC(len);
-    }
-}
-
 ASTNode* ast_create_node(ASTNodeType type, int line, int col) {
     return ast_create_node_arena(type, line, col, NULL);
 }
@@ -35,7 +20,10 @@ ASTNode* ast_create_node_arena(ASTNodeType type, int line, int col, KrtArena* ar
     } else {
         node = (ASTNode*)KRT_MALLOC(sizeof(ASTNode));
     }
-    if (!node) return NULL;
+    if (!node) {
+        printf("[DEBUG] ast_create_node_arena: FAILED! type=%d, arena=%p\n", type, (void*)arena);
+        return NULL;
+    }
 
     node->type = type;
     node->line = line;
@@ -71,6 +59,9 @@ void ast_destroy_node(ASTNode* node) {
             if (node->data.function_decl.parameter_types) {
                 KRT_FREE(node->data.function_decl.parameter_types);
             }
+            if (node->data.function_decl.parameter_is_params) {
+                KRT_FREE(node->data.function_decl.parameter_is_params);
+            }
             ast_destroy_node(node->data.function_decl.body);
             break;
         case AST_STATIC_FUNCTION_DECLARATION:
@@ -83,6 +74,9 @@ void ast_destroy_node(ASTNode* node) {
             }
             if (node->data.static_function_decl.parameter_types) {
                 KRT_FREE(node->data.static_function_decl.parameter_types);
+            }
+            if (node->data.static_function_decl.parameter_is_params) {
+                KRT_FREE(node->data.static_function_decl.parameter_is_params);
             }
             ast_destroy_node(node->data.static_function_decl.body);
             break;
@@ -171,6 +165,8 @@ void ast_destroy_node(ASTNode* node) {
             if (node->data.call.object) {
                 ast_destroy_node(node->data.call.object);
             }
+            if (node->data.call.resolved_class_name) KRT_FREE(node->data.call.resolved_class_name);
+            if (node->data.call.resolved_mangled_name) KRT_FREE(node->data.call.resolved_mangled_name);
             break;
         case AST_BLOCK:
             if (node->data.block.statements) {
@@ -193,7 +189,20 @@ void ast_destroy_node(ASTNode* node) {
             break;
         case AST_MEMBER_ACCESS:
             ast_destroy_node(node->data.member_access.object);
-            KRT_FREE(node->data.member_access.member_name);
+            if (node->data.member_access.member_name) KRT_FREE(node->data.member_access.member_name);
+            if (node->data.member_access.resolved_class_name) KRT_FREE(node->data.member_access.resolved_class_name);
+            if (node->data.member_access.resolved_mangled_name) KRT_FREE(node->data.member_access.resolved_mangled_name);
+            break;
+        case AST_STATIC_METHOD_CALL:
+            if (node->data.static_call.class_name) KRT_FREE(node->data.static_call.class_name);
+            if (node->data.static_call.method_name) KRT_FREE(node->data.static_call.method_name);
+            if (node->data.static_call.arguments) {
+                for (int i = 0; i < node->data.static_call.argument_count; i++) {
+                    ast_destroy_node(node->data.static_call.arguments[i]);
+                }
+                KRT_FREE(node->data.static_call.arguments);
+            }
+            if (node->data.static_call.resolved_mangled_name) KRT_FREE(node->data.static_call.resolved_mangled_name);
             break;
         case AST_ARRAY_ACCESS:
             ast_destroy_node(node->data.array_access.array);
@@ -279,6 +288,23 @@ void ast_destroy_node(ASTNode* node) {
             break;
         case AST_TEMPLATE_PARAMETER:
             if (node->data.template_param.param_name) KRT_FREE(node->data.template_param.param_name);
+            break;
+        case AST_TEMPLATE_INSTANTIATION:
+            if (node->data.template_instantiation.name) KRT_FREE(node->data.template_instantiation.name);
+            if (node->data.template_instantiation.type_args) {
+                for (int i = 0; i < node->data.template_instantiation.type_arg_count; i++) {
+                    if (node->data.template_instantiation.type_args[i]) {
+                        KRT_FREE(node->data.template_instantiation.type_args[i]);
+                    }
+                }
+                KRT_FREE(node->data.template_instantiation.type_args);
+            }
+            if (node->data.template_instantiation.args) {
+                for (int i = 0; i < node->data.template_instantiation.arg_count; i++) {
+                    ast_destroy_node(node->data.template_instantiation.args[i]);
+                }
+                KRT_FREE(node->data.template_instantiation.args);
+            }
             break;
         case AST_GENERIC_TYPE:
             if (node->data.generic_type.type_name) KRT_FREE(node->data.generic_type.type_name);
@@ -404,6 +430,43 @@ void ast_destroy_node(ASTNode* node) {
                 KRT_FREE(node->data.unsafe_call.permissions);
             }
             break;
+        case AST_DEFAULT_EXPRESSION:
+            if (node->data.default_expr.type_name) KRT_FREE(node->data.default_expr.type_name);
+            if (node->data.default_expr.type_expr) ast_destroy_node(node->data.default_expr.type_expr);
+            break;
+        case AST_IS_EXPRESSION:
+            if (node->data.is_expr.expression) ast_destroy_node(node->data.is_expr.expression);
+            if (node->data.is_expr.type_name) KRT_FREE(node->data.is_expr.type_name);
+            if (node->data.is_expr.type_expr) ast_destroy_node(node->data.is_expr.type_expr);
+            break;
+        case AST_AS_EXPRESSION:
+            if (node->data.as_expr.expression) ast_destroy_node(node->data.as_expr.expression);
+            if (node->data.as_expr.type_name) KRT_FREE(node->data.as_expr.type_name);
+            if (node->data.as_expr.type_expr) ast_destroy_node(node->data.as_expr.type_expr);
+            break;
+        case AST_YIELD_RETURN:
+            if (node->data.yield_return.value) ast_destroy_node(node->data.yield_return.value);
+            break;
+        case AST_LOCK_STATEMENT:
+            if (node->data.lock_stmt.lock_object) ast_destroy_node(node->data.lock_stmt.lock_object);
+            if (node->data.lock_stmt.body) ast_destroy_node(node->data.lock_stmt.body);
+            break;
+        case AST_OPERATOR_OVERLOAD:
+            if (node->data.operator_overload.operator_name) KRT_FREE(node->data.operator_overload.operator_name);
+            if (node->data.operator_overload.body) ast_destroy_node(node->data.operator_overload.body);
+            break;
+        case AST_DELEGATE_DECLARATION:
+            if (node->data.delegate_decl.name) KRT_FREE(node->data.delegate_decl.name);
+            if (node->data.delegate_decl.parameters) {
+                for (int i = 0; i < node->data.delegate_decl.parameter_count; i++) {
+                    KRT_FREE(node->data.delegate_decl.parameters[i]);
+                }
+                KRT_FREE(node->data.delegate_decl.parameters);
+            }
+            if (node->data.delegate_decl.parameter_types) {
+                KRT_FREE(node->data.delegate_decl.parameter_types);
+            }
+            break;
         default:
             break;
     }
@@ -411,8 +474,3 @@ void ast_destroy_node(ASTNode* node) {
     KRT_FREE(node);
 }
 
-static void ast_print_indent(int indent) {
-    for (int i = 0; i < indent; i++) {
-        printf("  ");
-    }
-}

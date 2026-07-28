@@ -1,0 +1,75 @@
+namespace System.Collections.Generic
+
+public interface IEnumerable<T>
+{
+    function GetEnumerator(): IEnumerator<T>
+}
+
+public interface IEnumerator<T>
+{
+    function get_Current(): T
+    function MoveNext(): bool
+    function Reset()
+    function Dispose()
+}
+
+public interface ICollection<T> : IEnumerable<T>
+{
+    function get_Count(): int32
+    function get_IsReadOnly(): bool
+    function Add(item: T)
+    function Clear()
+    function Contains(item: T): bool
+    function CopyTo(array: T[], arrayIndex: int32)
+    function Remove(item: T): bool
+}
+
+public interface IList<T> : ICollection<T>
+{
+    function get_Item(index: int32): T
+    function set_Item(index: int32, value: T)
+    function IndexOf(item: T): int32
+    function Insert(index: int32, item: T)
+    function RemoveAt(index: int32)
+}
+
+public interface IDictionary<TKey, TValue> : ICollection<KeyValuePair<TKey, TValue>>
+{
+    function get_Item(key: TKey): TValue
+    function set_Item(key: TKey, value: TValue)
+    function get_Keys(): ICollection<TKey>
+    function get_Values(): ICollection<TValue>
+    function Add(key: TKey, value: TValue)
+    function ContainsKey(key: TKey): bool
+    function Remove(key: TKey): bool
+    function TryGetValue(key: TKey, value: TValue): bool
+}
+
+public interface IComparer<T>
+{
+    function Compare(x: T, y: T): int32
+}
+
+public interface IEqualityComparer<T>
+{
+    function Equals(x: T, y: T): bool
+    function GetHashCode(obj: T): int32
+}
+
+public delegate function Predicate<T>(obj: T): bool
+
+public delegate function Action<T>(obj: T)
+
+public delegate function Action<T1, T2>(arg1: T1, arg2: T2)
+
+public delegate function Action<T1, T2, T3>(arg1: T1, arg2: T2, arg3: T3)
+
+public delegate function Func<TResult>(): TResult
+
+public delegate function Func<T, TResult>(arg: T): TResult
+
+public delegate function Func<T1, T2, TResult>(arg1: T1, arg2: T2): TResult
+
+public delegate function Func<T1, T2, T3, TResult>(arg1: T1, arg2: T2, arg3: T3): TResult
+
+public delegate function Converter<TInput, TOutput>(input: TInput): TOutput

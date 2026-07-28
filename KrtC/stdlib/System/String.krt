@@ -1,0 +1,688 @@
+namespace System
+
+public class String
+{
+    private var length: int32
+    private var data: char[]
+
+    public function String()
+    {
+        this.length = 0
+        this.data = new char[0]
+    }
+
+    public function String(value: char[])
+    {
+        this.length = value.Length
+        this.data = new char[this.length]
+        for var i = 0; i < this.length; i = i + 1
+        {
+            this.data[i] = value[i]
+        }
+    }
+
+    public function String(c: char, count: int32)
+    {
+        this.length = count
+        this.data = new char[count]
+        for var i = 0; i < count; i = i + 1
+        {
+            this.data[i] = c
+        }
+    }
+
+    public function Length(): int32
+    {
+        return this.length
+    }
+
+    public function get_Chars(index: int32): char
+    {
+        if index < 0 || index >= this.length
+        {
+            throw new IndexOutOfRangeException("Index was outside the bounds of the array.")
+        }
+        return this.data[index]
+    }
+
+    public function Substring(startIndex: int32): string
+    {
+        return this.Substring(startIndex, this.length - startIndex)
+    }
+
+    public function Substring(startIndex: int32, length: int32): string
+    {
+        if startIndex < 0 || startIndex > this.length
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if length < 0 || startIndex + length > this.length
+        {
+            throw new ArgumentOutOfRangeException("length")
+        }
+        if length == 0
+        {
+            return ""
+        }
+        var result = new char[length]
+        for var i = 0; i < length; i = i + 1
+        {
+            result[i] = this.data[startIndex + i]
+        }
+        return new String(result)
+    }
+
+    public function IndexOf(value: char): int32
+    {
+        return this.IndexOf(value, 0)
+    }
+
+    public function IndexOf(value: char, startIndex: int32): int32
+    {
+        if startIndex < 0 || startIndex > this.length
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        for var i = startIndex; i < this.length; i = i + 1
+        {
+            if this.data[i] == value
+            {
+                return i
+            }
+        }
+        return -1
+    }
+
+    public function IndexOf(value: string): int32
+    {
+        return this.IndexOf(value, 0)
+    }
+
+    public function IndexOf(value: string, startIndex: int32): int32
+    {
+        if value == null
+        {
+            throw new ArgumentNullException("value")
+        }
+        if startIndex < 0 || startIndex > this.length
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        var valueLen = value.Length()
+        if valueLen == 0
+        {
+            return startIndex
+        }
+        var maxIndex = this.length - valueLen + 1
+        for var i = startIndex; i < maxIndex; i = i + 1
+        {
+            var found = true
+            for var j = 0; j < valueLen; j = j + 1
+            {
+                if this.data[i + j] != value.get_Chars(j)
+                {
+                    found = false
+                    break
+                }
+            }
+            if found
+            {
+                return i
+            }
+        }
+        return -1
+    }
+
+    public function LastIndexOf(value: char): int32
+    {
+        return this.LastIndexOf(value, this.length - 1)
+    }
+
+    public function LastIndexOf(value: char, startIndex: int32): int32
+    {
+        if startIndex < 0 || startIndex >= this.length
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        for var i = startIndex; i >= 0; i = i - 1
+        {
+            if this.data[i] == value
+            {
+                return i
+            }
+        }
+        return -1
+    }
+
+    public function Contains(value: string): bool
+    {
+        return this.IndexOf(value) >= 0
+    }
+
+    public function StartsWith(value: string): bool
+    {
+        if value == null
+        {
+            throw new ArgumentNullException("value")
+        }
+        var valueLen = value.Length()
+        if valueLen > this.length
+        {
+            return false
+        }
+        for var i = 0; i < valueLen; i = i + 1
+        {
+            if this.data[i] != value.get_Chars(i)
+            {
+                return false
+            }
+        }
+        return true
+    }
+
+    public function EndsWith(value: string): bool
+    {
+        if value == null
+        {
+            throw new ArgumentNullException("value")
+        }
+        var valueLen = value.Length()
+        if valueLen > this.length
+        {
+            return false
+        }
+        var offset = this.length - valueLen
+        for var i = 0; i < valueLen; i = i + 1
+        {
+            if this.data[offset + i] != value.get_Chars(i)
+            {
+                return false
+            }
+        }
+        return true
+    }
+
+    public function ToLower(): string
+    {
+        var result = new char[this.length]
+        for var i = 0; i < this.length; i = i + 1
+        {
+            var c = this.data[i]
+            if c >= 'A' && c <= 'Z'
+            {
+                result[i] = char(int32(c) + 32)
+            }
+            else
+            {
+                result[i] = c
+            }
+        }
+        return new String(result)
+    }
+
+    public function ToUpper(): string
+    {
+        var result = new char[this.length]
+        for var i = 0; i < this.length; i = i + 1
+        {
+            var c = this.data[i]
+            if c >= 'a' && c <= 'z'
+            {
+                result[i] = char(int32(c) - 32)
+            }
+            else
+            {
+                result[i] = c
+            }
+        }
+        return new String(result)
+    }
+
+    public function Trim(): string
+    {
+        return this.Trim([' ', '\t', '\n', '\r'])
+    }
+
+    public function Trim(trimChars: char[]): string
+    {
+        if this.length == 0
+        {
+            return this
+        }
+        var start = 0
+        var end = this.length - 1
+        while start <= end && this.is_trim_char(this.data[start], trimChars)
+        {
+            start = start + 1
+        }
+        while end >= start && this.is_trim_char(this.data[end], trimChars)
+        {
+            end = end - 1
+        }
+        var newLen = end - start + 1
+        if newLen == this.length
+        {
+            return this
+        }
+        if newLen <= 0
+        {
+            return ""
+        }
+        var result = new char[newLen]
+        for var i = 0; i < newLen; i = i + 1
+        {
+            result[i] = this.data[start + i]
+        }
+        return new String(result)
+    }
+
+    private function is_trim_char(c: char, trimChars: char[]): bool
+    {
+        for var i = 0; i < trimChars.Length; i = i + 1
+        {
+            if c == trimChars[i]
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    public function Split(separator: char[]): string[]
+    {
+        if this.length == 0
+        {
+            return new string[0]
+        }
+        var parts = new List<string>()
+        var start = 0
+        for var i = 0; i < this.length; i = i + 1
+        {
+            if this.is_separator(this.data[i], separator)
+            {
+                if i > start
+                {
+                    parts.Add(this.Substring(start, i - start))
+                }
+                start = i + 1
+            }
+        }
+        if start < this.length
+        {
+            parts.Add(this.Substring(start))
+        }
+        return parts.ToArray()
+    }
+
+    private function is_separator(c: char, separators: char[]): bool
+    {
+        for var i = 0; i < separators.Length; i = i + 1
+        {
+            if c == separators[i]
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    public function Replace(oldValue: string, newValue: string): string
+    {
+        if oldValue == null
+        {
+            throw new ArgumentNullException("oldValue")
+        }
+        if newValue == null
+        {
+            throw new ArgumentNullException("newValue")
+        }
+        var oldLen = oldValue.Length()
+        if oldLen == 0
+        {
+            return this
+        }
+        var result = ""
+        var i = 0
+        while i < this.length
+        {
+            var found = true
+            if i + oldLen <= this.length
+            {
+                for var j = 0; j < oldLen; j = j + 1
+                {
+                    if this.data[i + j] != oldValue.get_Chars(j)
+                    {
+                        found = false
+                        break
+                    }
+                }
+            }
+            else
+            {
+                found = false
+            }
+            if found
+            {
+                result = result + newValue
+                i = i + oldLen
+            }
+            else
+            {
+                result = result + new String([this.data[i]])
+                i = i + 1
+            }
+        }
+        return result
+    }
+
+    public function Insert(startIndex: int32, value: string): string
+    {
+        if startIndex < 0 || startIndex > this.length
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if value == null
+        {
+            throw new ArgumentNullException("value")
+        }
+        var valueLen = value.Length()
+        var newLen = this.length + valueLen
+        var result = new char[newLen]
+        for var i = 0; i < startIndex; i = i + 1
+        {
+            result[i] = this.data[i]
+        }
+        for var i = 0; i < valueLen; i = i + 1
+        {
+            result[startIndex + i] = value.get_Chars(i)
+        }
+        for var i = startIndex; i < this.length; i = i + 1
+        {
+            result[valueLen + i] = this.data[i]
+        }
+        return new String(result)
+    }
+
+    public function Remove(startIndex: int32): string
+    {
+        return this.Remove(startIndex, this.length - startIndex)
+    }
+
+    public function Remove(startIndex: int32, count: int32): string
+    {
+        if startIndex < 0 || startIndex > this.length
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if count < 0 || startIndex + count > this.length
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if count == 0
+        {
+            return this
+        }
+        var newLen = this.length - count
+        var result = new char[newLen]
+        for var i = 0; i < startIndex; i = i + 1
+        {
+            result[i] = this.data[i]
+        }
+        for var i = startIndex + count; i < this.length; i = i + 1
+        {
+            result[i - count] = this.data[i]
+        }
+        return new String(result)
+    }
+
+    public static function Concat(str0: string, str1: string): string
+    {
+        if str0 == null
+        {
+            str0 = ""
+        }
+        if str1 == null
+        {
+            str1 = ""
+        }
+        return str0 + str1
+    }
+
+    public static function Concat(str0: string, str1: string, str2: string): string
+    {
+        if str0 == null
+        {
+            str0 = ""
+        }
+        if str1 == null
+        {
+            str1 = ""
+        }
+        if str2 == null
+        {
+            str2 = ""
+        }
+        return str0 + str1 + str2
+    }
+
+    public static function Concat(str0: string, str1: string, str2: string, str3: string): string
+    {
+        if str0 == null
+        {
+            str0 = ""
+        }
+        if str1 == null
+        {
+            str1 = ""
+        }
+        if str2 == null
+        {
+            str2 = ""
+        }
+        if str3 == null
+        {
+            str3 = ""
+        }
+        return str0 + str1 + str2 + str3
+    }
+
+    public static function Concat(values: string[]): string
+    {
+        if values == null
+        {
+            throw new ArgumentNullException("values")
+        }
+        var result = ""
+        for var i = 0; i < values.Length; i = i + 1
+        {
+            if values[i] != null
+            {
+                result = result + values[i]
+            }
+        }
+        return result
+    }
+
+    public static function IsNullOrEmpty(value: string): bool
+    {
+        return value == null || value.Length() == 0
+    }
+
+    public static function IsNullOrWhiteSpace(value: string): bool
+    {
+        if value == null
+        {
+            return true
+        }
+        for var i = 0; i < value.Length(); i = i + 1
+        {
+            var c = value.get_Chars(i)
+            if c != ' ' && c != '\t' && c != '\n' && c != '\r'
+            {
+                return false
+            }
+        }
+        return true
+    }
+
+    public static function Format(format: string, arg0: Object): string
+    {
+        if format == null
+        {
+            throw new ArgumentNullException("format")
+        }
+        return format.Replace("{0}", arg0.ToString())
+    }
+
+    public static function Format(format: string, arg0: Object, arg1: Object): string
+    {
+        if format == null
+        {
+            throw new ArgumentNullException("format")
+        }
+        return format.Replace("{0}", arg0.ToString()).Replace("{1}", arg1.ToString())
+    }
+
+    public static function Format(format: string, arg0: Object, arg1: Object, arg2: Object): string
+    {
+        if format == null
+        {
+            throw new ArgumentNullException("format")
+        }
+        return format.Replace("{0}", arg0.ToString()).Replace("{1}", arg1.ToString()).Replace("{2}", arg2.ToString())
+    }
+
+    public static function Join(separator: string, values: string[]): string
+    {
+        if values == null
+        {
+            throw new ArgumentNullException("values")
+        }
+        if separator == null
+        {
+            separator = ""
+        }
+        var result = ""
+        for var i = 0; i < values.Length; i = i + 1
+        {
+            if i > 0
+            {
+                result = result + separator
+            }
+            if values[i] != null
+            {
+                result = result + values[i]
+            }
+        }
+        return result
+    }
+
+    public static function Join(separator: string, values: string[], startIndex: int32, count: int32): string
+    {
+        if values == null
+        {
+            throw new ArgumentNullException("values")
+        }
+        if startIndex < 0 || startIndex > values.Length
+        {
+            throw new ArgumentOutOfRangeException("startIndex")
+        }
+        if count < 0 || startIndex + count > values.Length
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if separator == null
+        {
+            separator = ""
+        }
+        var result = ""
+        for var i = 0; i < count; i = i + 1
+        {
+            if i > 0
+            {
+                result = result + separator
+            }
+            var value = values[startIndex + i]
+            if value != null
+            {
+                result = result + value
+            }
+        }
+        return result
+    }
+
+    public static function Compare(strA: string, strB: string): int32
+    {
+        if strA == null && strB == null
+        {
+            return 0
+        }
+        if strA == null
+        {
+            return -1
+        }
+        if strB == null
+        {
+            return 1
+        }
+        var len = strA.Length()
+        if strB.Length() < len
+        {
+            len = strB.Length()
+        }
+        for var i = 0; i < len; i = i + 1
+        {
+            var c1 = strA.get_Chars(i)
+            var c2 = strB.get_Chars(i)
+            if c1 < c2
+            {
+                return -1
+            }
+            if c1 > c2
+            {
+                return 1
+            }
+        }
+        if strA.Length() < strB.Length()
+        {
+            return -1
+        }
+        if strA.Length() > strB.Length()
+        {
+            return 1
+        }
+        return 0
+    }
+
+    public static function Equals(a: string, b: string): bool
+    {
+        if a == null && b == null
+        {
+            return true
+        }
+        if a == null || b == null
+        {
+            return false
+        }
+        if a.Length() != b.Length()
+        {
+            return false
+        }
+        return a == b
+    }
+
+    public static function Copy(str: string): string
+    {
+        if str == null
+        {
+            return null
+        }
+        var len = str.Length()
+        var result = new char[len]
+        for var i = 0; i < len; i = i + 1
+        {
+            result[i] = str.get_Chars(i)
+        }
+        return new String(result)
+    }
+}

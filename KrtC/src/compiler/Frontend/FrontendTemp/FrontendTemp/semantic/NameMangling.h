@@ -15,6 +15,8 @@ void name_mangling_cleanup(void);
 
 char* name_mangle_simple(const char* class_name, const char* member_name);
 
+char* name_mangle_constructor(const char* class_name, int parameter_count);
+
 char* name_mangle_names(const char** namespaces, const char* name);
 
 char* name_mangle_from_ast(ASTNode* namespace_node, const char* name);

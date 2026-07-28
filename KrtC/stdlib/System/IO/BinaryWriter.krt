@@ -1,0 +1,258 @@
+namespace System.IO
+
+public class BinaryWriter
+{
+    public static var Null: BinaryWriter = new BinaryWriter(Stream.Null)
+
+    private var stream: Stream
+    private var encoding: Encoding
+    private var buffer: uint8[]
+    private var largeBuffer: uint8[]
+
+    public function BinaryWriter(output: Stream)
+    {
+        this.BinaryWriter(output, Encoding.UTF8)
+    }
+
+    public function BinaryWriter(output: Stream, encoding: Encoding)
+    {
+        this.BinaryWriter(output, encoding, false)
+    }
+
+    public function BinaryWriter(output: Stream, encoding: Encoding, leaveOpen: bool)
+    {
+        if output == null
+        {
+            throw new ArgumentNullException("output")
+        }
+        if encoding == null
+        {
+            throw new ArgumentNullException("encoding")
+        }
+        if !output.CanWrite
+        {
+            throw new ArgumentException("Stream does not support writing")
+        }
+        this.stream = output
+        this.encoding = encoding
+        this.buffer = new uint8[16]
+    }
+
+    public function get_BaseStream(): Stream
+    {
+        return this.stream
+    }
+
+    public function Close()
+    {
+        this.Dispose()
+    }
+
+    public function Dispose()
+    {
+        if this.stream != null
+        {
+            this.stream.Close()
+            this.stream = null
+            this.buffer = null
+            this.largeBuffer = null
+        }
+    }
+
+    public function Flush()
+    {
+        this.stream.Flush()
+    }
+
+    public function Seek(offset: int64, origin: SeekOrigin): int64
+    {
+        return this.stream.Seek(offset, origin)
+    }
+
+    public function Write(value: bool)
+    {
+        this.buffer[0] = value ? uint8(1) : uint8(0)
+        this.stream.Write(this.buffer, 0, 1)
+    }
+
+    public function Write(value: uint8)
+    {
+        this.stream.WriteByte(value)
+    }
+
+    public function Write(buffer: uint8[])
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        this.stream.Write(buffer, 0, buffer.Length)
+    }
+
+    public function Write(buffer: uint8[], index: int32, count: int32)
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        this.stream.Write(buffer, index, count)
+    }
+
+    public function Write(ch: char)
+    {
+        var bytes = this.encoding.GetBytes([ch])
+        this.stream.Write(bytes, 0, bytes.Length)
+    }
+
+    public function Write(chars: char[])
+    {
+        if chars == null
+        {
+            throw new ArgumentNullException("chars")
+        }
+        var bytes = this.encoding.GetBytes(chars, 0, chars.Length)
+        this.stream.Write(bytes, 0, bytes.Length)
+    }
+
+    public function Write(chars: char[], index: int32, count: int32)
+    {
+        if chars == null
+        {
+            throw new ArgumentNullException("chars")
+        }
+        var bytes = this.encoding.GetBytes(chars, index, count)
+        this.stream.Write(bytes, 0, bytes.Length)
+    }
+
+    public function Write(value: float64)
+    {
+        var bits = unsafe_convert_float64_to_uint64(value)
+        this.buffer[0] = uint8(bits)
+        this.buffer[1] = uint8(bits >> 8)
+        this.buffer[2] = uint8(bits >> 16)
+        this.buffer[3] = uint8(bits >> 24)
+        this.buffer[4] = uint8(bits >> 32)
+        this.buffer[5] = uint8(bits >> 40)
+        this.buffer[6] = uint8(bits >> 48)
+        this.buffer[7] = uint8(bits >> 56)
+        this.stream.Write(this.buffer, 0, 8)
+    }
+
+    public function Write(value: int16)
+    {
+        this.buffer[0] = uint8(value)
+        this.buffer[1] = uint8(value >> 8)
+        this.stream.Write(this.buffer, 0, 2)
+    }
+
+    public function Write(value: int32)
+    {
+        this.buffer[0] = uint8(value)
+        this.buffer[1] = uint8(value >> 8)
+        this.buffer[2] = uint8(value >> 16)
+        this.buffer[3] = uint8(value >> 24)
+        this.stream.Write(this.buffer, 0, 4)
+    }
+
+    public function Write(value: int64)
+    {
+        this.buffer[0] = uint8(value)
+        this.buffer[1] = uint8(value >> 8)
+        this.buffer[2] = uint8(value >> 16)
+        this.buffer[3] = uint8(value >> 24)
+        this.buffer[4] = uint8(value >> 32)
+        this.buffer[5] = uint8(value >> 40)
+        this.buffer[6] = uint8(value >> 48)
+        this.buffer[7] = uint8(value >> 56)
+        this.stream.Write(this.buffer, 0, 8)
+    }
+
+    public function Write(value: int8)
+    {
+        this.buffer[0] = uint8(value)
+        this.stream.Write(this.buffer, 0, 1)
+    }
+
+    public function Write(value: float32)
+    {
+        var bits = unsafe_convert_float32_to_uint32(value)
+        this.buffer[0] = uint8(bits)
+        this.buffer[1] = uint8(bits >> 8)
+        this.buffer[2] = uint8(bits >> 16)
+        this.buffer[3] = uint8(bits >> 24)
+        this.stream.Write(this.buffer, 0, 4)
+    }
+
+    public function Write(value: string)
+    {
+        if value == null
+        {
+            throw new ArgumentNullException("value")
+        }
+        var bytes = this.encoding.GetBytes(value)
+        this.Write7BitEncodedInt(bytes.Length)
+        this.stream.Write(bytes, 0, bytes.Length)
+    }
+
+    public function Write(value: uint16)
+    {
+        this.buffer[0] = uint8(value)
+        this.buffer[1] = uint8(value >> 8)
+        this.stream.Write(this.buffer, 0, 2)
+    }
+
+    public function Write(value: uint32)
+    {
+        this.buffer[0] = uint8(value)
+        this.buffer[1] = uint8(value >> 8)
+        this.buffer[2] = uint8(value >> 16)
+        this.buffer[3] = uint8(value >> 24)
+        this.stream.Write(this.buffer, 0, 4)
+    }
+
+    public function Write(value: uint64)
+    {
+        this.buffer[0] = uint8(value)
+        this.buffer[1] = uint8(value >> 8)
+        this.buffer[2] = uint8(value >> 16)
+        this.buffer[3] = uint8(value >> 24)
+        this.buffer[4] = uint8(value >> 32)
+        this.buffer[5] = uint8(value >> 40)
+        this.buffer[6] = uint8(value >> 48)
+        this.buffer[7] = uint8(value >> 56)
+        this.stream.Write(this.buffer, 0, 8)
+    }
+
+    public function Write(value: Decimal)
+    {
+        var parts = value.GetBits()
+        this.buffer[0] = uint8(parts[0])
+        this.buffer[1] = uint8(parts[0] >> 8)
+        this.buffer[2] = uint8(parts[0] >> 16)
+        this.buffer[3] = uint8(parts[0] >> 24)
+        this.buffer[4] = uint8(parts[1])
+        this.buffer[5] = uint8(parts[1] >> 8)
+        this.buffer[6] = uint8(parts[1] >> 16)
+        this.buffer[7] = uint8(parts[1] >> 24)
+        this.buffer[8] = uint8(parts[2])
+        this.buffer[9] = uint8(parts[2] >> 8)
+        this.buffer[10] = uint8(parts[2] >> 16)
+        this.buffer[11] = uint8(parts[2] >> 24)
+        this.buffer[12] = uint8(parts[3])
+        this.buffer[13] = uint8(parts[3] >> 8)
+        this.buffer[14] = uint8(parts[3] >> 16)
+        this.buffer[15] = uint8(parts[3] >> 24)
+        this.stream.Write(this.buffer, 0, 16)
+    }
+
+    private function Write7BitEncodedInt(value: int32)
+    {
+        var v = uint32(value)
+        while v >= 0x80
+        {
+            this.stream.WriteByte(uint8(v | 0x80))
+            v = v >> 7
+        }
+        this.stream.WriteByte(uint8(v))
+    }
+}

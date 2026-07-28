@@ -10,8 +10,8 @@
     "include": [
       "src",
       "src/runtime/standalone",
-      "shared",
-      "C:/Users/18231/Desktop/KairotrLang/ArkLink/include"
+      "Shared",
+      "../ArkLink/include"
     ]
   },
   "compiler": {
@@ -33,7 +33,10 @@
       "-DNDEBUG",
       "-pthread"
     ],
-    "extra_flags": [],
+    "extra_flags": [
+      "-D_GNU_SOURCE",
+      "-D_DEFAULT_SOURCE"
+    ],
     "defines": [],
     "libraries": [
       "pthread",
@@ -59,7 +62,9 @@
     "header_extensions": [
       ".h"
     ],
-    "exclude_patterns": []
+    "exclude_patterns": [
+      "**/Runtime/**"
+    ]
   },
   "features": {
     "colored_output": true,

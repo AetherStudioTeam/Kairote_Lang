@@ -19,6 +19,25 @@ static int digit_count(int n) {
     return count;
 }
 
+static char mangle_param_type_char(KrtTokenType type) {
+    switch (type) {
+        case TOKEN_INT8:  return 'c';
+        case TOKEN_INT16: return 's';
+        case TOKEN_INT32: return 'i';
+        case TOKEN_INT64: return 'l';
+        case TOKEN_UINT8:  return 'C';
+        case TOKEN_UINT16: return 'S';
+        case TOKEN_UINT32: return 'I';
+        case TOKEN_UINT64: return 'L';
+        case TOKEN_FLOAT32: return 'f';
+        case TOKEN_FLOAT64: return 'd';
+        case TOKEN_BOOL:   return 'b';
+        case TOKEN_STRING: return 'r';
+        case TOKEN_VOID:   return 'v';
+        default:           return 'x';
+    }
+}
+
 static int write_number(char* buffer, int n) {
     if (n == 0) {
         buffer[0] = '0';
@@ -54,17 +73,37 @@ char* name_mangle_simple(const char* class_name, const char* member_name) {
     if (!class_name || !member_name) {
         return NULL;
     }
-    
+
     size_t class_len = strlen(class_name);
     size_t member_len = strlen(member_name);
-    size_t total_len = class_len + member_len + 3; 
-    
+    size_t total_len = class_len + member_len + 3;
+
     char* mangled = (char*)KRT_MALLOC(total_len);
     if (!mangled) {
         return NULL;
     }
-    
+
     snprintf(mangled, total_len, "%s__%s", class_name, member_name);
+    return mangled;
+}
+
+char* name_mangle_constructor(const char* class_name, int parameter_count) {
+    if (!class_name) {
+        return NULL;
+    }
+
+    size_t class_len = strlen(class_name);
+    char count_str[16];
+    snprintf(count_str, sizeof(count_str), "%d", parameter_count);
+    size_t count_len = strlen(count_str);
+    size_t total_len = class_len + strlen("__constructor_") + count_len + 1;
+
+    char* mangled = (char*)KRT_MALLOC(total_len);
+    if (!mangled) {
+        return NULL;
+    }
+
+    snprintf(mangled, total_len, "%s__constructor_%s", class_name, count_str);
     return mangled;
 }
 
@@ -182,34 +221,8 @@ char* name_mangle_function(const char** namespaces,
     
     size_t param_encoding_len = 0;
     for (int i = 0; i < param_count; i++) {
-        switch (param_types[i]) {
-            case TOKEN_INT8:
-            case TOKEN_INT16:
-            case TOKEN_INT32:
-            case TOKEN_INT64:
-            case TOKEN_UINT8:
-            case TOKEN_UINT16:
-            case TOKEN_UINT32:
-            case TOKEN_UINT64:
-                param_encoding_len += 1; 
-                break;
-            case TOKEN_FLOAT32:
-            case TOKEN_FLOAT64:
-                param_encoding_len += 1; 
-                break;
-            case TOKEN_BOOL:
-                param_encoding_len += 1; 
-                break;
-            case TOKEN_STRING:
-                param_encoding_len += 1; 
-                break;
-            case TOKEN_VOID:
-                param_encoding_len += 1; 
-                break;
-            default:
-                param_encoding_len += 1; 
-                break;
-        }
+        (void)mangle_param_type_char(param_types[i]);
+        param_encoding_len += 1;
     }
     
     size_t base_len = strlen(base_mangled);
@@ -225,34 +238,7 @@ char* name_mangle_function(const char** namespaces,
     
     char* ptr = result + base_len;
     for (int i = 0; i < param_count; i++) {
-        switch (param_types[i]) {
-            case TOKEN_INT8:
-            case TOKEN_INT16:
-            case TOKEN_INT32:
-            case TOKEN_INT64:
-            case TOKEN_UINT8:
-            case TOKEN_UINT16:
-            case TOKEN_UINT32:
-            case TOKEN_UINT64:
-                *ptr++ = 'i';
-                break;
-            case TOKEN_FLOAT32:
-            case TOKEN_FLOAT64:
-                *ptr++ = 'f';
-                break;
-            case TOKEN_BOOL:
-                *ptr++ = 'b';
-                break;
-            case TOKEN_STRING:
-                *ptr++ = 's';
-                break;
-            case TOKEN_VOID:
-                *ptr++ = 'v';
-                break;
-            default:
-                *ptr++ = 'x';
-                break;
-        }
+        *ptr++ = mangle_param_type_char(param_types[i]);
     }
     *ptr = '\0';
     

@@ -38,9 +38,9 @@ Kairote Lang 保留以下关键字：
 
 ```
 function, var, if, else, while, for, foreach, in, return, print,
-true, false, and, or, not, new, delete, class, struct, interface,
+true, false, new, delete, class, struct, interface,
 enum, namespace, this, base, public, private, protected, static,
-virtual, abstract, override, using, import, package, console,
+virtual, abstract, override, using, package, console,
 try, catch, finally, throw, exception, template, typename, where,
 switch, case, break, continue, default
 ```

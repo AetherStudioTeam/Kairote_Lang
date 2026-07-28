@@ -3,11 +3,12 @@
 #include "ArkLink/loader.h"
 #include "ArkLink/resolver.h"
 #include "ArkLink/backend_pe.h"
+#include "ArkLink/backend_elf.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
-extern struct ArkLinkSession {
+struct ArkLinkSession {
     ArkLinkTarget target;
     ArkLinkOutputKind output_kind;
     char* output_path;
@@ -85,6 +86,17 @@ ArkLinkResult arklink_session_link_native(ArkLinkSession* session) {
         return result;
     }
 
+    /* Override resolver default image base with the session value. */
+    if (plan.backend_input) {
+        if (session->image_base) {
+            plan.backend_input->image_base = session->image_base;
+        } else if (session->target == ARK_LINK_TARGET_PE) {
+            plan.backend_input->image_base = 0x140000000ULL;
+        } else {
+            plan.backend_input->image_base = 0x400000ULL;
+        }
+    }
+
     log_message(session, ARK_LOG_INFO, "Linking with backend...");
 
     ArkBackendOutput output = {0};
@@ -92,6 +104,9 @@ ArkLinkResult arklink_session_link_native(ArkLinkSession* session) {
     switch (session->target) {
         case ARK_LINK_TARGET_PE:
             result = ark_backend_pe_link(ctx, plan.backend_input, &output);
+            break;
+        case ARK_LINK_TARGET_ELF:
+            result = ark_backend_elf_link(ctx, plan.backend_input, &output);
             break;
         default:
             result = ARK_LINK_ERR_UNSUPPORTED;

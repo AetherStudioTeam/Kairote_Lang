@@ -149,68 +149,102 @@ class ProgressDisplay:
         self.total_tasks = 0
         self.completed_tasks = 0
         self.skipped_tasks = 0
-        self.workers = ["> IDLE"] * max_workers
+        self.workers: List[Optional[str]] = [None] * max_workers
         self.lock = threading.Lock()
         self.running = False
-        self.linKrtPrinted = 0
-        
-    def update_worker(self, worker_id: int, status: str):
+        self.last_render_lines = 0
+        self._last_render_time = 0
+        self.render_interval = 0.05
+
+    def update_worker(self, worker_id: int, status: Optional[str]):
         with self.lock:
             if 0 <= worker_id < self.max_workers:
                 self.workers[worker_id] = status
-                
+
     def update_progress(self, completed: int, total: int, skipped: int = 0):
         with self.lock:
             self.completed_tasks = completed
             self.total_tasks = total
             self.skipped_tasks = skipped
-            
-    def clear_lines(self, n: int):
-        for _ in range(n):
-            sys.stdout.write('\033[F')
-            sys.stdout.write('\033[K')
-            
-    def render(self):
+
+    def _clear_screen(self):
+        if sys.platform == 'win32':
+            os.system('cls')
+        else:
+            os.system('clear')
+
+    def _move_cursor_up(self, n: int):
+        if n > 0:
+            sys.stdout.write(f'\033[{n}A')
+
+    def _clear_line(self):
+        sys.stdout.write('\033[2K\r')
+
+    def render(self, force: bool = False):
         with self.lock:
-            if self.running and self.linKrtPrinted > 0:
-                self.clear_lines(self.linKrtPrinted)
-            else:
-                self.running = True
-            percentage = (self.completed_tasks / self.total_tasks * 100) if self.total_tasks > 0 else 0
-            progress = f"{Color.OKBLUE}Building{Color.ENDC} [{self.completed_tasks}/{self.total_tasks}] {percentage:.1f}%"
-            print(f"{Color.BOLD}{progress}{Color.ENDC}")
+            now = time.time()
+            if not force and now - self._last_render_time < self.render_interval:
+                return
+            self._last_render_time = now
+
+            if self.total_tasks == 0:
+                return
+
+            percentage = (self.completed_tasks / self.total_tasks * 100)
+
+            lines = []
+
+            status_text = f"Building [{self.completed_tasks}/{self.total_tasks}] {percentage:.1f}%"
+            lines.append(f"{Color.BOLD}{Color.OKBLUE}{status_text}{Color.ENDC}")
+
             if self.show_progress_bar:
                 bar_width = 40
-                filled = int(bar_width * self.completed_tasks / self.total_tasks) if self.total_tasks > 0 else 0
+                filled = int(bar_width * self.completed_tasks / self.total_tasks)
+                filled = min(filled, bar_width)
                 bar = '█' * filled + '░' * (bar_width - filled)
-                print(f"{Color.OKCYAN}{bar}{Color.ENDC}")
+                lines.append(f"{Color.OKCYAN}{bar}{Color.ENDC}")
+
             if self.skipped_tasks > 0:
-                print(f"{Color.GRAY}({self.skipped_tasks} up-to-date){Color.ENDC}")
+                lines.append(f"{Color.GRAY}({self.skipped_tasks} up-to-date){Color.ENDC}")
             else:
-                print()
-            for worker in self.workers:
-                print(worker)
-            print()
-            self.linKrtPrinted = 4 + self.max_workers
+                lines.append("")
+
+            active_workers = [w for w in self.workers if w is not None]
+            if active_workers:
+                lines.append(f"{Color.BOLD}Active tasks:{Color.ENDC}")
+                for w in active_workers[:self.max_workers]:
+                    lines.append(f"  {w}")
+            else:
+                lines.append(f"{Color.GRAY}Waiting...{Color.ENDC}")
+
+            if self.running and self.last_render_lines > 0:
+                self._move_cursor_up(self.last_render_lines)
+
+            for line in lines:
+                self._clear_line()
+                print(line)
+
+            self.last_render_lines = len(lines)
+            self.running = True
             sys.stdout.flush()
-            
+
     def finalize(self, success: bool):
         with self.lock:
-            if self.linKrtPrinted > 0:
-                self.clear_lines(self.linKrtPrinted)
-            
+            if self.running and self.last_render_lines > 0:
+                self._move_cursor_up(self.last_render_lines)
+
             status = f"{Color.OKGREEN}BUILD SUCCESSFUL{Color.ENDC}" if success else f"{Color.FAIL}BUILD FAILED{Color.ENDC}"
+            self._clear_line()
             print(f"{Color.BOLD}{status} [{self.total_tasks}/{self.total_tasks}]{Color.ENDC}")
-            
+
             if self.skipped_tasks > 0:
+                self._clear_line()
                 print(f"{Color.GRAY}({self.skipped_tasks} up-to-date){Color.ENDC}")
-            else:
+
+            for _ in range(self.max_workers + 1):
+                self._clear_line()
                 print()
-            
-            for _ in range(self.max_workers):
-                print(f"{Color.GRAY}> IDLE{Color.ENDC}")
-            print()
-            
+
             sys.stdout.flush()
             self.running = False
 
@@ -252,7 +286,7 @@ class SourceScanner:
                         sources.append(source)
         
         if not self.build_vm:
-            shared_dir = Path('shared')
+            shared_dir = Path('Shared')
             if shared_dir.exists():
                 for ext in self.source_exts:
                     for source in shared_dir.rglob(f'*{ext}'):
@@ -313,12 +347,13 @@ class SourceScanner:
         return tasks
 
 class Builder:
-    def __init__(self, config: BuildConfig, debug: bool = True, 
+    def __init__(self, config: BuildConfig, debug: bool = True,
              max_workers: Optional[int] = None, incremental: Optional[bool] = None,
-             verbose: bool = False, build_vm: bool = False):
+             verbose: bool = False, build_vm: bool = False, warnings: bool = False):
         self.config = config
         self.debug = debug
-        self.verbose = verbose        
+        self.verbose = verbose
+        self.warnings = warnings
         self.max_workers = max_workers or config.get('build', 'max_workers', default=4)
         self.incremental = incremental if incremental is not None else config.get('build', 'incremental', default=True)
         self.build_vm = build_vm
@@ -329,13 +364,14 @@ class Builder:
         self.failed = False
         self.start_time = None
         self.error_output = []
+        self.warning_output = []
         self.lock = threading.Lock()
         self.src_dir = Path(config.get('directories', 'source', default='src'))
         self.obj_dir = Path(config.get('directories', 'objects', default='obj'))
         self.bin_dir = Path(config.get('directories', 'binary', default='bin'))
         self.include_dirs = [Path(d) for d in config.get('directories', 'include', default=['src'])]
         
-        shared_dir = Path('shared')
+        shared_dir = Path('Shared')
         if shared_dir.exists() and shared_dir not in self.include_dirs:
             self.include_dirs.append(shared_dir)
         
@@ -369,13 +405,17 @@ class Builder:
             flags.extend(self.config.get('compiler', 'debug_flags', default=['-g', '-DDEBUG']))
         else:
             flags.extend(self.config.get('compiler', 'release_flags', default=['-O2', '-DNDEBUG']))
+
+        if self.warnings:
+            flags.extend(['-Wall', '-Wextra', '-Wpedantic'])
+
         flags.extend(self.config.get('compiler', 'extra_flags', default=[]))
         for define in self.config.get('compiler', 'defines', default=[]):
             flags.append(f'-D{define}')
         for inc_dir in self.include_dirs:
             if inc_dir.exists():
                 flags.append(f'-I{str(inc_dir).replace(chr(92), "/")}')
-        
+
         return flags
     
     def load_cache(self) -> dict:
@@ -453,7 +493,7 @@ class Builder:
     def update_cache(self, task: BuildTask):
         if not self.incremental:
             return
-        
+
         cache_key = str(task.source)
         self.cache[cache_key] = {
             'hash': self.get_file_hash(task.source),
@@ -517,19 +557,19 @@ class Builder:
                 self.display.update_progress(self.completed_tasks, self.total_tasks, self.skipped_tasks)
                 self.display.render()
             return True, task
-        
+
         worker_id = self.available_workers.get()
-        
+
         try:
-            worker_status = f"{Color.OKCYAN}> Task :{task.task_id} {task.description}{Color.ENDC}"
+            worker_status = f"{Color.OKCYAN}[{task.task_id}] {task.description}{Color.ENDC}"
             self.display.update_worker(worker_id, worker_status)
             self.display.render()
-            
+
             cmd = [self.cc] + self.cflags + ["-c", str(task.source), "-o", str(task.output)]
-            
+
             if self.verbose:
                 print(f"\n{Color.GRAY}$ {' '.join(cmd)}{Color.ENDC}")
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -537,10 +577,10 @@ class Builder:
                 check=False,
                 timeout=self.config.get('build', 'timeout', default=60)
             )
-            
+
             task.duration = time.time() - start
-            self.display.update_worker(worker_id, f"{Color.GRAY}> IDLE{Color.ENDC}")
-            
+            self.display.update_worker(worker_id, None)
+
             if result.returncode != 0:
                 with self.lock:
                     self.error_output.append({
@@ -551,10 +591,19 @@ class Builder:
                         'command': ' '.join(cmd)
                     })
                 return False, task
-            
+
+            # 收集编译警告（如果有）
+            if result.stderr:
+                with self.lock:
+                    self.warning_output.append({
+                        'task': task.description,
+                        'warnings': result.stderr,
+                        'duration': task.duration
+                    })
+
             self.update_cache(task)
             return True, task
-            
+
         except subprocess.TimeoutExpired:
             task.duration = time.time() - start
             with self.lock:
@@ -565,9 +614,9 @@ class Builder:
                     'duration': task.duration,
                     'command': ' '.join(cmd) if 'cmd' in locals() else 'N/A'
                 })
-            self.display.update_worker(worker_id, f"{Color.GRAY}> IDLE{Color.ENDC}")
+            self.display.update_worker(worker_id, None)
             return False, task
-            
+
         except Exception as e:
             task.duration = time.time() - start
             with self.lock:
@@ -578,9 +627,9 @@ class Builder:
                     'duration': task.duration,
                     'command': ' '.join(cmd) if 'cmd' in locals() else 'N/A'
                 })
-            self.display.update_worker(worker_id, f"{Color.GRAY}> IDLE{Color.ENDC}")
+            self.display.update_worker(worker_id, None)
             return False, task
-            
+
         finally:
             self.available_workers.put(worker_id)
             with self.lock:
@@ -591,38 +640,38 @@ class Builder:
     def link_executable(self) -> bool:
         start = time.time()
         worker_id = self.available_workers.get()
-        
+
         try:
             task_id = self.total_tasks
-            worker_status = f"{Color.OKCYAN}> Task :{task_id} Linking executable{Color.ENDC}"
+            worker_status = f"{Color.OKCYAN}[{task_id}] Linking executable{Color.ENDC}"
             self.display.update_worker(worker_id, worker_status)
             self.display.render()
-            
+
             obj_files = [str(task.output) for task in self.tasks]
-            
+
             if self.build_vm:
                 output_name = 'vm_executor'
             else:
                 output_name = self.config.get('project', 'output', default='program')
-                
+
             if sys.platform == 'win32':
                 output_name += '.exe'
             output_path = self.bin_dir / output_name
-            
+
             cmd = [self.cc] + obj_files + ["-o", str(output_path)]
-            
+
             for lib in self.config.get('compiler', 'libraries', default=[]):
                 cmd.append(f'-l{lib}')
-            
+
             platform = sys.platform
             platform_libs = self.config.get('compiler', 'platform_libraries', default={})
             if platform in platform_libs:
                 for lib in platform_libs[platform]:
                     cmd.append(f'-l{lib}')
-            
+
             if self.verbose:
                 print(f"\n{Color.GRAY}$ {' '.join(cmd)}{Color.ENDC}")
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -630,10 +679,10 @@ class Builder:
                 check=False,
                 timeout=self.config.get('build', 'timeout', default=60)
             )
-            
+
             duration = time.time() - start
-            self.display.update_worker(worker_id, f"{Color.GRAY}> IDLE{Color.ENDC}")
-            
+            self.display.update_worker(worker_id, None)
+
             if result.returncode != 0:
                 with self.lock:
                     self.error_output.append({
@@ -644,9 +693,9 @@ class Builder:
                         'command': ' '.join(cmd)
                     })
                 return False
-            
+
             return True
-            
+
         except Exception as e:
             duration = time.time() - start
             with self.lock:
@@ -657,9 +706,9 @@ class Builder:
                     'duration': duration,
                     'command': ' '.join(cmd) if 'cmd' in locals() else 'N/A'
                 })
-            self.display.update_worker(worker_id, f"{Color.GRAY}> IDLE{Color.ENDC}")
+            self.display.update_worker(worker_id, None)
             return False
-            
+
         finally:
             self.available_workers.put(worker_id)
             with self.lock:
@@ -669,6 +718,18 @@ class Builder:
     
     def print_summary(self):
         total_duration = time.time() - self.start_time
+
+        # 输出所有收集到的警告
+        if self.warning_output:
+            print()
+            for warn in self.warning_output:
+                print(f"{Color.WARNING}{Color.BOLD}Warnings in {warn['task']}:{Color.ENDC}")
+                if warn.get('warnings'):
+                    print(f"{Color.WARNING}{warn['warnings']}{Color.ENDC}")
+                if self.verbose:
+                    print(f"  {Color.GRAY}Duration: {warn['duration']:.2f}s{Color.ENDC}")
+                print()
+
         if self.error_output:
             print()
             for error in self.error_output:
@@ -784,9 +845,9 @@ class Builder:
 
     def build(self) -> int:
         self.start_time = time.time()
-        
+
         version_str = self.update_version()
-        
+
         self.print_header()
         print(f"{Color.GRAY}Version:     {Color.ENDC}{Color.BOLD}{version_str}{Color.ENDC}")
         print()
@@ -795,12 +856,12 @@ class Builder:
             scanner = SourceScanner(self.config, self.build_vm)
             self.tasks = scanner.create_tasks()
             print(f"  {Color.OKGREEN}Found {len(self.tasks)} source files{Color.ENDC}")
-            
+
             if self.verbose:
                 for task in self.tasks:
                     print(f"    {Color.GRAY}{task.source}{Color.ENDC}")
             print()
-        
+
         if not self.tasks:
             print(f"{Color.FAIL}No source files found!{Color.ENDC}")
             return 1
@@ -808,13 +869,14 @@ class Builder:
         self.create_directories()
         print(f"  {Color.OKGREEN}Directories ready{Color.ENDC}")
         print()
-        
+
         self.total_tasks = len(self.tasks) + 1
         self.display.update_progress(0, self.total_tasks, 0)
-        self.display.render()
+        self.display.render(force=True)
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {executor.submit(self.compile_task, task): task for task in self.tasks}
-            
+
             for future in as_completed(futures):
                 try:
                     success, task = future.result()
@@ -825,17 +887,21 @@ class Builder:
                     if self.verbose:
                         print(f"\n{Color.FAIL}Unexpected error: {e}{Color.ENDC}")
                         traceback.print_exc()
-        
+
+        if self.incremental:
+            self.save_cache()
+
         if self.failed:
             self.display.finalize(False)
             self.print_summary()
             return 1
+
         if not self.link_executable():
             self.failed = True
             self.display.finalize(False)
             self.print_summary()
             return 1
-        
+
         stdlib_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stdlib')
         stdlib_dst = os.path.join(self.bin_dir, 'stdlib')
         if os.path.exists(stdlib_src):
@@ -846,10 +912,7 @@ class Builder:
                 print(f"{Color.OKGREEN}  Copied standard library to {stdlib_dst}{Color.ENDC}")
             except Exception as e:
                 print(f"{Color.WARNING}  Warning: Could not copy standard library: {e}{Color.ENDC}")
-        
-        if self.incremental:
-            self.save_cache()
-        
+
         self.display.finalize(True)
         self.print_summary()
         return 0
@@ -859,8 +922,7 @@ def main():
     
     parser = argparse.ArgumentParser(
         description='Universal C Build System',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
     parser.add_argument('--release', action='store_true',
@@ -877,6 +939,8 @@ def main():
                        help='Number of parallel workers')
     parser.add_argument('-v', '--verbose', action='store_true',
                        help='Verbose output')
+    parser.add_argument('-W', '--warnings', action='store_true',
+                       help='Enable compiler warnings (-Wall -Wextra -Wpedantic)')
     parser.add_argument('--vm', action='store_true',
                        help='Build VM executor instead of main compiler')
     parser.add_argument('--lsp', action='store_true',
@@ -903,7 +967,8 @@ def main():
         max_workers=args.workers,
         incremental=not args.no_incremental,
         verbose=args.verbose,
-        build_vm=args.vm
+        build_vm=args.vm,
+        warnings=args.warnings
     )
     if args.clean or args.clean_only:
         builder.clean()

@@ -1,0 +1,463 @@
+namespace System.IO
+
+public static class File
+{
+    public static function Open(path: string, mode: FileMode): FileStream
+    {
+        return new FileStream(path, mode)
+    }
+
+    public static function Open(path: string, mode: FileMode, access: FileAccess): FileStream
+    {
+        return new FileStream(path, mode, access)
+    }
+
+    public static function Open(path: string, mode: FileMode, access: FileAccess, share: FileShare): FileStream
+    {
+        return new FileStream(path, mode, access, share)
+    }
+
+    public static function OpenRead(path: string): FileStream
+    {
+        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)
+    }
+
+    public static function OpenWrite(path: string): FileStream
+    {
+        return new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None)
+    }
+
+    public static function Create(path: string): FileStream
+    {
+        return new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None)
+    }
+
+    public static function Create(path: string, bufferSize: int32): FileStream
+    {
+        return new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, bufferSize)
+    }
+
+    public static function Create(path: string, bufferSize: int32, options: FileOptions): FileStream
+    {
+        return new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, bufferSize, (options & FileOptions.Asynchronous) == FileOptions.Asynchronous)
+    }
+
+    public static function Delete(path: string)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        var result = unsafe_file_delete(path)
+        if result != 0
+        {
+            throw new IOException("Could not delete file")
+        }
+    }
+
+    public static function Exists(path: string): bool
+    {
+        if path == null
+        {
+            return false
+        }
+        return unsafe_file_exists(path)
+    }
+
+    public static function Copy(sourceFileName: string, destFileName: string)
+    {
+        File.Copy(sourceFileName, destFileName, false)
+    }
+
+    public static function Copy(sourceFileName: string, destFileName: string, overwrite: bool)
+    {
+        if sourceFileName == null
+        {
+            throw new ArgumentNullException("sourceFileName")
+        }
+        if destFileName == null
+        {
+            throw new ArgumentNullException("destFileName")
+        }
+        if !File.Exists(sourceFileName)
+        {
+            throw new FileNotFoundException("Source file not found", sourceFileName)
+        }
+        if !overwrite && File.Exists(destFileName)
+        {
+            throw new IOException("Destination file already exists")
+        }
+        var result = unsafe_file_copy(sourceFileName, destFileName, overwrite)
+        if result != 0
+        {
+            throw new IOException("Could not copy file")
+        }
+    }
+
+    public static function Move(sourceFileName: string, destFileName: string)
+    {
+        File.Move(sourceFileName, destFileName, false)
+    }
+
+    public static function Move(sourceFileName: string, destFileName: string, overwrite: bool)
+    {
+        if sourceFileName == null
+        {
+            throw new ArgumentNullException("sourceFileName")
+        }
+        if destFileName == null
+        {
+            throw new ArgumentNullException("destFileName")
+        }
+        if !File.Exists(sourceFileName)
+        {
+            throw new FileNotFoundException("Source file not found", sourceFileName)
+        }
+        if !overwrite && File.Exists(destFileName)
+        {
+            throw new IOException("Destination file already exists")
+        }
+        var result = unsafe_file_move(sourceFileName, destFileName, overwrite)
+        if result != 0
+        {
+            throw new IOException("Could not move file")
+        }
+    }
+
+    public static function Replace(sourceFileName: string, destinationFileName: string, destinationBackupFileName: string)
+    {
+        File.Replace(sourceFileName, destinationFileName, destinationBackupFileName, false)
+    }
+
+    public static function Replace(sourceFileName: string, destinationFileName: string, destinationBackupFileName: string, ignoreMetadataErrors: bool)
+    {
+        if sourceFileName == null
+        {
+            throw new ArgumentNullException("sourceFileName")
+        }
+        if destinationFileName == null
+        {
+            throw new ArgumentNullException("destinationFileName")
+        }
+        if !File.Exists(sourceFileName)
+        {
+            throw new FileNotFoundException("Source file not found", sourceFileName)
+        }
+        if !File.Exists(destinationFileName)
+        {
+            throw new FileNotFoundException("Destination file not found", destinationFileName)
+        }
+        if destinationBackupFileName != null && destinationBackupFileName.Length > 0 && File.Exists(destinationFileName)
+        {
+            File.Copy(destinationFileName, destinationBackupFileName, true)
+        }
+        File.Copy(sourceFileName, destinationFileName, true)
+        File.Delete(sourceFileName)
+    }
+
+    public static function ReadAllBytes(path: string): uint8[]
+    {
+        using var stream = File.OpenRead(path)
+        var length = stream.Length
+        if length > int64(int32.MaxValue)
+        {
+            throw new IOException("File too large")
+        }
+        var buffer = new uint8[int32(length)]
+        stream.ReadExactly(buffer, 0, int32(length))
+        return buffer
+    }
+
+    public static function ReadAllText(path: string): string
+    {
+        return File.ReadAllText(path, Encoding.UTF8)
+    }
+
+    public static function ReadAllText(path: string, encoding: Encoding): string
+    {
+        using var stream = File.OpenRead(path)
+        var length = stream.Length
+        if length > int64(int32.MaxValue)
+        {
+            throw new IOException("File too large")
+        }
+        var buffer = new uint8[int32(length)]
+        stream.ReadExactly(buffer, 0, int32(length))
+        return encoding.GetString(buffer)
+    }
+
+    public static function ReadAllLines(path: string): string[]
+    {
+        return File.ReadAllLines(path, Encoding.UTF8)
+    }
+
+    public static function ReadAllLines(path: string, encoding: Encoding): string[]
+    {
+        var text = File.ReadAllText(path, encoding)
+        return text.Split(['\n'])
+    }
+
+    public static function WriteAllBytes(path: string, bytes: uint8[])
+    {
+        if bytes == null
+        {
+            throw new ArgumentNullException("bytes")
+        }
+        using var stream = File.Create(path)
+        stream.Write(bytes, 0, bytes.Length)
+    }
+
+    public static function WriteAllText(path: string, contents: string)
+    {
+        File.WriteAllText(path, contents, Encoding.UTF8)
+    }
+
+    public static function WriteAllText(path: string, contents: string, encoding: Encoding)
+    {
+        if contents == null
+        {
+            contents = ""
+        }
+        var bytes = encoding.GetBytes(contents)
+        File.WriteAllBytes(path, bytes)
+    }
+
+    public static function WriteAllLines(path: string, contents: string[])
+    {
+        File.WriteAllLines(path, contents, Encoding.UTF8)
+    }
+
+    public static function WriteAllLines(path: string, contents: string[], encoding: Encoding)
+    {
+        if contents == null
+        {
+            throw new ArgumentNullException("contents")
+        }
+        using var stream = new StreamWriter(path, false, encoding)
+        for var i = 0; i < contents.Length; i = i + 1
+        {
+            stream.WriteLine(contents[i])
+        }
+    }
+
+    public static function AppendAllText(path: string, contents: string)
+    {
+        File.AppendAllText(path, contents, Encoding.UTF8)
+    }
+
+    public static function AppendAllText(path: string, contents: string, encoding: Encoding)
+    {
+        if contents == null
+        {
+            return
+        }
+        using var stream = new StreamWriter(path, true, encoding)
+        stream.Write(contents)
+    }
+
+    public static function AppendAllLines(path: string, contents: IEnumerable<string>)
+    {
+        File.AppendAllLines(path, contents, Encoding.UTF8)
+    }
+
+    public static function AppendAllLines(path: string, contents: IEnumerable<string>, encoding: Encoding)
+    {
+        if contents == null
+        {
+            throw new ArgumentNullException("contents")
+        }
+        using var stream = new StreamWriter(path, true, encoding)
+        for var line in contents
+        {
+            stream.WriteLine(line)
+        }
+    }
+
+    public static function ReadLines(path: string): IEnumerable<string>
+    {
+        return File.ReadLines(path, Encoding.UTF8)
+    }
+
+    public static function ReadLines(path: string, encoding: Encoding): IEnumerable<string>
+    {
+        var lines = new List<string>()
+        using var stream = File.OpenRead(path)
+        using var reader = new StreamReader(stream, encoding)
+        var line = reader.ReadLine()
+        while line != null
+        {
+            lines.Add(line)
+            line = reader.ReadLine()
+        }
+        return lines
+    }
+
+    public static function GetCreationTime(path: string): DateTime
+    {
+        return File.GetCreationTimeUtc(path).ToLocalTime()
+    }
+
+    public static function GetCreationTimeUtc(path: string): DateTime
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        var ticks = unsafe_file_get_creation_time(path)
+        return new DateTime(ticks)
+    }
+
+    public static function GetLastAccessTime(path: string): DateTime
+    {
+        return File.GetLastAccessTimeUtc(path).ToLocalTime()
+    }
+
+    public static function GetLastAccessTimeUtc(path: string): DateTime
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        var ticks = unsafe_file_get_last_access_time(path)
+        return new DateTime(ticks)
+    }
+
+    public static function GetLastWriteTime(path: string): DateTime
+    {
+        return File.GetLastWriteTimeUtc(path).ToLocalTime()
+    }
+
+    public static function GetLastWriteTimeUtc(path: string): DateTime
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        var ticks = unsafe_file_get_last_write_time(path)
+        return new DateTime(ticks)
+    }
+
+    public static function SetCreationTime(path: string, creationTime: DateTime)
+    {
+        File.SetCreationTimeUtc(path, creationTime.ToUniversalTime())
+    }
+
+    public static function SetCreationTimeUtc(path: string, creationTime: DateTime)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        unsafe_file_set_creation_time(path, creationTime.get_Ticks())
+    }
+
+    public static function SetLastAccessTime(path: string, lastAccessTime: DateTime)
+    {
+        File.SetLastAccessTimeUtc(path, lastAccessTime.ToUniversalTime())
+    }
+
+    public static function SetLastAccessTimeUtc(path: string, lastAccessTime: DateTime)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        unsafe_file_set_last_access_time(path, lastAccessTime.get_Ticks())
+    }
+
+    public static function SetLastWriteTime(path: string, lastWriteTime: DateTime)
+    {
+        File.SetLastWriteTimeUtc(path, lastWriteTime.ToUniversalTime())
+    }
+
+    public static function SetLastWriteTimeUtc(path: string, lastWriteTime: DateTime)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        unsafe_file_set_last_write_time(path, lastWriteTime.get_Ticks())
+    }
+
+    public static function GetAttributes(path: string): FileAttributes
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        return unsafe_file_get_attributes(path)
+    }
+
+    public static function SetAttributes(path: string, fileAttributes: FileAttributes)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        unsafe_file_set_attributes(path, fileAttributes)
+    }
+
+    public static function Encrypt(path: string)
+    {
+        throw new NotSupportedException("File encryption is not supported")
+    }
+
+    public static function Decrypt(path: string)
+    {
+        throw new NotSupportedException("File decryption is not supported")
+    }
+
+    public static function CreateSymbolicLink(path: string, pathToTarget: string)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        if pathToTarget == null
+        {
+            throw new ArgumentNullException("pathToTarget")
+        }
+        unsafe_file_create_symlink(path, pathToTarget)
+    }
+
+    public static function ResolveLinkTarget(linkPath: string, returnFinalTarget: bool): FileSystemInfo
+    {
+        throw new NotSupportedException("Link resolution is not supported")
+    }
+
+    public static function CreateTempFileName(): string
+    {
+        return Path.Combine(Path.GetTempPath(), Path.GetRandomFileName())
+    }
+}
+
+public enum FileOptions
+{
+    None = 0
+    WriteThrough = int32(0x80000000)
+    Asynchronous = int32(0x40000000)
+    RandomAccess = 0x10000000
+    SequentialScan = 0x08000000
+    DeleteOnClose = 0x04000000
+    Encrypted = 0x00004000
+}
+
+public enum FileAttributes
+{
+    ReadOnly = 0x00000001
+    Hidden = 0x00000002
+    System = 0x00000004
+    Directory = 0x00000010
+    Archive = 0x00000020
+    Device = 0x00000040
+    Normal = 0x00000080
+    Temporary = 0x00000100
+    SparseFile = 0x00000200
+    ReparsePoint = 0x00000400
+    Compressed = 0x00000800
+    Offline = 0x00001000
+    NotContentIndexed = 0x00002000
+    Encrypted = 0x00004000
+    IntegrityStream = 0x00008000
+    NoScrubData = 0x00020000
+}

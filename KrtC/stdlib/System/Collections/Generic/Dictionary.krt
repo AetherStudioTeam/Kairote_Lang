@@ -1,0 +1,479 @@
+namespace System.Collections.Generic
+
+public class Dictionary<TKey, TValue>
+{
+    private var buckets: int32[]
+    private var entries: Entry[]
+    private var count: int32
+    private var freeList: int32
+    private var freeCount: int32
+    private var version: int32
+
+    private struct Entry
+    {
+        public var hashCode: int32
+        public var next: int32
+        public var key: TKey
+        public var value: TValue
+    }
+
+    public function Dictionary()
+    {
+        this.Initialize(0)
+    }
+
+    public function Dictionary(capacity: int32)
+    {
+        if capacity < 0
+        {
+            throw new ArgumentOutOfRangeException("capacity")
+        }
+        this.Initialize(capacity)
+    }
+
+    private function Initialize(capacity: int32)
+    {
+        var size = this.GetPrime(capacity)
+        this.buckets = new int32[size]
+        for var i = 0; i < size; i = i + 1
+        {
+            this.buckets[i] = -1
+        }
+        this.entries = new Entry[size]
+        this.freeList = -1
+        this.freeCount = 0
+        this.count = 0
+        this.version = 0
+    }
+
+    private function GetPrime(min: int32): int32
+    {
+        if min <= 3
+        {
+            return 3
+        }
+        if min <= 7
+        {
+            return 7
+        }
+        if min <= 11
+        {
+            return 11
+        }
+        if min <= 17
+        {
+            return 17
+        }
+        if min <= 23
+        {
+            return 23
+        }
+        if min <= 29
+        {
+            return 29
+        }
+        if min <= 37
+        {
+            return 37
+        }
+        if min <= 47
+        {
+            return 47
+        }
+        if min <= 59
+        {
+            return 59
+        }
+        if min <= 71
+        {
+            return 71
+        }
+        if min <= 89
+        {
+            return 89
+        }
+        if min <= 107
+        {
+            return 107
+        }
+        if min <= 131
+        {
+            return 131
+        }
+        if min <= 163
+        {
+            return 163
+        }
+        if min <= 197
+        {
+            return 197
+        }
+        if min <= 239
+        {
+            return 239
+        }
+        if min <= 293
+        {
+            return 293
+        }
+        if min <= 353
+        {
+            return 353
+        }
+        if min <= 431
+        {
+            return 431
+        }
+        if min <= 521
+        {
+            return 521
+        }
+        if min <= 631
+        {
+            return 631
+        }
+        if min <= 761
+        {
+            return 761
+        }
+        if min <= 919
+        {
+            return 919
+        }
+        return min * 2
+    }
+
+    public function get_Count(): int32
+    {
+        return this.count - this.freeCount
+    }
+
+    public function get_Item(key: TKey): TValue
+    {
+        var entry = this.FindEntry(key)
+        if entry >= 0
+        {
+            return this.entries[entry].value
+        }
+        throw new KeyNotFoundException("The given key was not present in the dictionary.")
+    }
+
+    public function set_Item(key: TKey, value: TValue)
+    {
+        this.Insert(key, value, false)
+    }
+
+    public function Add(key: TKey, value: TValue)
+    {
+        this.Insert(key, value, true)
+    }
+
+    public function Remove(key: TKey): bool
+    {
+        if key == null
+        {
+            throw new ArgumentNullException("key")
+        }
+        var hashCode = key.GetHashCode() & 0x7FFFFFFF
+        var bucket = hashCode % this.buckets.Length
+        var last = -1
+        var i = this.buckets[bucket]
+        while i >= 0
+        {
+            if this.entries[i].hashCode == hashCode && this.entries[i].key == key
+            {
+                if last < 0
+                {
+                    this.buckets[bucket] = this.entries[i].next
+                }
+                else
+                {
+                    this.entries[last].next = this.entries[i].next
+                }
+                this.entries[i].hashCode = -1
+                this.entries[i].next = this.freeList
+                this.entries[i].key = default(TKey)
+                this.entries[i].value = default(TValue)
+                this.freeList = i
+                this.freeCount = this.freeCount + 1
+                this.version = this.version + 1
+                return true
+            }
+            last = i
+            i = this.entries[i].next
+        }
+        return false
+    }
+
+    public function Clear()
+    {
+        if this.count > 0
+        {
+            for var i = 0; i < this.buckets.Length; i = i + 1
+            {
+                this.buckets[i] = -1
+            }
+            for var i = 0; i < this.count; i = i + 1
+            {
+                this.entries[i] = default(Entry)
+            }
+            this.freeList = -1
+            this.freeCount = 0
+            this.count = 0
+            this.version = this.version + 1
+        }
+    }
+
+    public function ContainsKey(key: TKey): bool
+    {
+        return this.FindEntry(key) >= 0
+    }
+
+    public function ContainsValue(value: TValue): bool
+    {
+        for var i = 0; i < this.count; i = i + 1
+        {
+            if this.entries[i].hashCode >= 0 && this.entries[i].value == value
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    public function TryGetValue(key: TKey, value: TValue): bool
+    {
+        var entry = this.FindEntry(key)
+        if entry >= 0
+        {
+            value = this.entries[entry].value
+            return true
+        }
+        value = default(TValue)
+        return false
+    }
+
+    private function FindEntry(key: TKey): int32
+    {
+        if key == null
+        {
+            throw new ArgumentNullException("key")
+        }
+        if this.buckets != null
+        {
+            var hashCode = key.GetHashCode() & 0x7FFFFFFF
+            var i = this.buckets[hashCode % this.buckets.Length]
+            while i >= 0
+            {
+                if this.entries[i].hashCode == hashCode && this.entries[i].key == key
+                {
+                    return i
+                }
+                i = this.entries[i].next
+            }
+        }
+        return -1
+    }
+
+    private function Insert(key: TKey, value: TValue, add: bool)
+    {
+        if key == null
+        {
+            throw new ArgumentNullException("key")
+        }
+        if this.buckets == null
+        {
+            this.Initialize(0)
+        }
+        var hashCode = key.GetHashCode() & 0x7FFFFFFF
+        var targetBucket = hashCode % this.buckets.Length
+        var i = this.buckets[targetBucket]
+        while i >= 0
+        {
+            if this.entries[i].hashCode == hashCode && this.entries[i].key == key
+            {
+                if add
+                {
+                    throw new ArgumentException("An item with the same key has already been added.")
+                }
+                this.entries[i].value = value
+                this.version = this.version + 1
+                return
+            }
+            i = this.entries[i].next
+        }
+        var index = 0
+        if this.freeCount > 0
+        {
+            index = this.freeList
+            this.freeList = this.entries[index].next
+            this.freeCount = this.freeCount - 1
+        }
+        else
+        {
+            if this.count == this.entries.Length
+            {
+                this.Resize()
+                targetBucket = hashCode % this.buckets.Length
+            }
+            index = this.count
+            this.count = this.count + 1
+        }
+        this.entries[index].hashCode = hashCode
+        this.entries[index].next = this.buckets[targetBucket]
+        this.entries[index].key = key
+        this.entries[index].value = value
+        this.buckets[targetBucket] = index
+        this.version = this.version + 1
+    }
+
+    private function Resize()
+    {
+        var newSize = this.GetPrime(this.count * 2)
+        var newBuckets = new int32[newSize]
+        for var i = 0; i < newSize; i = i + 1
+        {
+            newBuckets[i] = -1
+        }
+        var newEntries = new Entry[newSize]
+        for var i = 0; i < this.count; i = i + 1
+        {
+            newEntries[i] = this.entries[i]
+        }
+        for var i = 0; i < this.count; i = i + 1
+        {
+            if newEntries[i].hashCode >= 0
+            {
+                var bucket = newEntries[i].hashCode % newSize
+                newEntries[i].next = newBuckets[bucket]
+                newBuckets[bucket] = i
+            }
+        }
+        this.buckets = newBuckets
+        this.entries = newEntries
+    }
+
+    public function GetEnumerator(): IEnumerator<KeyValuePair<TKey, TValue>>
+    {
+        return new DictionaryEnumerator<TKey, TValue>(this)
+    }
+
+    public function get_Keys(): ICollection<TKey>
+    {
+        var keys = new List<TKey>(this.Count)
+        for var i = 0; i < this.count; i = i + 1
+        {
+            if this.entries[i].hashCode >= 0
+            {
+                keys.Add(this.entries[i].key)
+            }
+        }
+        return keys
+    }
+
+    public function get_Values(): ICollection<TValue>
+    {
+        var values = new List<TValue>(this.Count)
+        for var i = 0; i < this.count; i = i + 1
+        {
+            if this.entries[i].hashCode >= 0
+            {
+                values.Add(this.entries[i].value)
+            }
+        }
+        return values
+    }
+}
+
+public class DictionaryEnumerator<TKey, TValue> : IEnumerator<KeyValuePair<TKey, TValue>>
+{
+    private var dictionary: Dictionary<TKey, TValue>
+    private var index: int32
+    private var version: int32
+    private var current: KeyValuePair<TKey, TValue>
+
+    public function DictionaryEnumerator(dictionary: Dictionary<TKey, TValue>)
+    {
+        this.dictionary = dictionary
+        this.index = 0
+        this.version = dictionary.version
+        this.current = default(KeyValuePair<TKey, TValue>)
+    }
+
+    public function MoveNext(): bool
+    {
+        while this.index < this.dictionary.count
+        {
+            if this.dictionary.entries[this.index].hashCode >= 0
+            {
+                this.current = new KeyValuePair<TKey, TValue>(
+                    this.dictionary.entries[this.index].key,
+                    this.dictionary.entries[this.index].value
+                )
+                this.index = this.index + 1
+                return true
+            }
+            this.index = this.index + 1
+        }
+        this.index = this.dictionary.count + 1
+        this.current = default(KeyValuePair<TKey, TValue>)
+        return false
+    }
+
+    public function Reset()
+    {
+        this.index = 0
+        this.current = default(KeyValuePair<TKey, TValue>)
+    }
+
+    public function get_Current(): KeyValuePair<TKey, TValue>
+    {
+        return this.current
+    }
+
+    public function Dispose()
+    {
+    }
+}
+
+public struct KeyValuePair<TKey, TValue>
+{
+    private var key: TKey
+    private var value: TValue
+
+    public function KeyValuePair(key: TKey, value: TValue)
+    {
+        this.key = key
+        this.value = value
+    }
+
+    public function get_Key(): TKey
+    {
+        return this.key
+    }
+
+    public function get_Value(): TValue
+    {
+        return this.value
+    }
+
+    public function ToString(): string
+    {
+        return "[" + this.key.ToString() + ", " + this.value.ToString() + "]"
+    }
+}
+
+public class KeyNotFoundException : Exception
+{
+    public function KeyNotFoundException(): base()
+    {
+    }
+
+    public function KeyNotFoundException(message: string): base(message)
+    {
+    }
+
+    public function KeyNotFoundException(message: string, innerException: Exception): base(message, innerException)
+    {
+    }
+}

@@ -11,8 +11,6 @@ extern "C" {
 typedef struct {
     KrtConfig* config;
     KrtPlatform* platform;
-    char temp_asm_file[KRT_MAX_PATH];
-    int temp_asm_created;
     char error_message[256];
 } KrtBuildContext;
 

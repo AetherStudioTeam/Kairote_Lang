@@ -61,13 +61,6 @@ static bool IsIdentifierChar(char c) {
     return isalnum(c) || c == '_';
 }
 
-static const char* FindIdentifierEnd(const char* str) {
-    while (*str && IsIdentifierChar(*str)) {
-        str++;
-    }
-    return str;
-}
-
 char* PreprocessorProcess(Preprocessor* preprocessor, const char* source) {
     if (!preprocessor || !source) return NULL;
     

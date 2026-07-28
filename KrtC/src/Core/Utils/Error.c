@@ -5,4 +5,3 @@
 #include <string.h>
 #include <assert.h>
 
-static KrtStackAnalyzer* g_stack_analyzer = NULL;

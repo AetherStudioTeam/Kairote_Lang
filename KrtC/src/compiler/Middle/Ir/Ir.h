@@ -133,6 +133,7 @@ typedef struct KrtIRBasicBlock {
 typedef struct {
     char* name;
     KrtTokenType type;
+    int is_params;
 } KrtIRParam;
 
 typedef struct {

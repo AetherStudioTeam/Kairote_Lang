@@ -37,7 +37,7 @@ static char* XmlGetAttribute(const char* xml_content, const char* element_name, 
 
     char element_tag[256];
     int element_tag_len = snprintf(element_tag, sizeof(element_tag), "<%s", element_name);
-    if (element_tag_len < 0 || element_tag_len >= sizeof(element_tag)) {
+    if (element_tag_len < 0 || (size_t)element_tag_len >= sizeof(element_tag)) {
         return NULL;
     }
 
@@ -46,7 +46,7 @@ static char* XmlGetAttribute(const char* xml_content, const char* element_name, 
 
     char attr_pattern[256];
     int attr_pattern_len = snprintf(attr_pattern, sizeof(attr_pattern), "%s=\"", attr_name);
-    if (attr_pattern_len < 0 || attr_pattern_len >= sizeof(attr_pattern)) {
+    if (attr_pattern_len < 0 || (size_t)attr_pattern_len >= sizeof(attr_pattern)) {
         return NULL;
     }
 
@@ -83,7 +83,7 @@ static char* XmlGetElementContent(const char* xml_content, const char* element_n
 
     char start_tag[256];
     int start_tag_len = snprintf(start_tag, sizeof(start_tag), "<%s>", element_name);
-    if (start_tag_len < 0 || start_tag_len >= sizeof(start_tag)) {
+    if (start_tag_len < 0 || (size_t)start_tag_len >= sizeof(start_tag)) {
         return NULL;
     }
 
@@ -92,7 +92,7 @@ static char* XmlGetElementContent(const char* xml_content, const char* element_n
 
         char self_closing_tag[256];
         int self_closing_len = snprintf(self_closing_tag, sizeof(self_closing_tag), "<%s ", element_name);
-        if (self_closing_len > 0 && self_closing_len < sizeof(self_closing_tag)) {
+        if (self_closing_len > 0 && (size_t)self_closing_len < sizeof(self_closing_tag)) {
             content_start = strstr(xml_content, self_closing_tag);
             if (content_start) {
 
@@ -110,7 +110,7 @@ static char* XmlGetElementContent(const char* xml_content, const char* element_n
 
     char end_tag[256];
     int end_tag_len = snprintf(end_tag, sizeof(end_tag), "</%s>", element_name);
-    if (end_tag_len < 0 || end_tag_len >= sizeof(end_tag)) {
+    if (end_tag_len < 0 || (size_t)end_tag_len >= sizeof(end_tag)) {
         return NULL;
     }
 

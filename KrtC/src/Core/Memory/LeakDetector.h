@@ -1,7 +1,7 @@
 #ifndef KRT_MEMORY_LEAK_DETECTOR_H
 #define KRT_MEMORY_LEAK_DETECTOR_H
 
-#include "../Utils/logger.h"
+#include "../Utils/Logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

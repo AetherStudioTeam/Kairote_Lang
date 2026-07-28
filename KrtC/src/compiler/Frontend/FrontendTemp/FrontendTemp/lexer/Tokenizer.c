@@ -31,6 +31,11 @@ static Keyword keywords[] = {
     
     {"true", TOKEN_TRUE},
     {"false", TOKEN_FALSE},
+    {"null", TOKEN_NULL},
+    {"_", TOKEN_UNDERSCORE},
+    {"fixed", TOKEN_FIXED},
+    {"async", TOKEN_ASYNC},
+    {"await", TOKEN_AWAIT},
     {"unsafe", TOKEN_UNSAFE},
     {"class", TOKEN_CLASS},
     {"struct", TOKEN_STRUCT},
@@ -92,6 +97,47 @@ static Keyword keywords[] = {
     {"on", TOKEN_ON},
     {"equals", TOKEN_EQUALS},
     {"into", TOKEN_INTO},
+    {"is", TOKEN_IS},
+    {"as", TOKEN_AS},
+    {"yield", TOKEN_YIELD},
+    {"lock", TOKEN_LOCK},
+    {"match", TOKEN_MATCH},
+    {"with", TOKEN_WITH},
+    {"when", TOKEN_WHEN},
+    {"params", TOKEN_PARAMS},
+    {"operator", TOKEN_OPERATOR},
+    {"async", TOKEN_ASYNC},
+    {"await", TOKEN_AWAIT},
+    {"where", TOKEN_WHERE},
+    {"delegate", TOKEN_DELEGATE},
+    {"sizeof", TOKEN_SIZEOF},
+    {"stackalloc", TOKEN_STACKALLOC},
+    {"op_Addition", TOKEN_OP_ADDITION},
+    {"op_Subtraction", TOKEN_OP_SUBTRACTION},
+    {"op_Multiply", TOKEN_OP_MULTIPLY},
+    {"op_Division", TOKEN_OP_DIVISION},
+    {"op_Modulo", TOKEN_OP_MODULO},
+    {"op_Equality", TOKEN_OP_EQUALITY},
+    {"op_Inequality", TOKEN_OP_INEQUALITY},
+    {"op_LessThan", TOKEN_OP_LESS},
+    {"op_GreaterThan", TOKEN_OP_GREATER},
+    {"op_LessThanOrEqual", TOKEN_OP_LESS_EQUAL},
+    {"op_GreaterThanOrEqual", TOKEN_OP_GREATER_EQUAL},
+    {"op_BitwiseAnd", TOKEN_OP_BITWISE_AND},
+    {"op_BitwiseOr", TOKEN_OP_BITWISE_OR},
+    {"op_BitwiseXor", TOKEN_OP_BITWISE_XOR},
+    {"op_LeftShift", TOKEN_OP_LEFT_SHIFT},
+    {"op_RightShift", TOKEN_OP_RIGHT_SHIFT},
+    {"op_UnaryPlus", TOKEN_OP_UNARY_PLUS},
+    {"op_UnaryMinus", TOKEN_OP_UNARY_MINUS},
+    {"op_LogicalNot", TOKEN_OP_LOGICAL_NOT},
+    {"op_BitwiseNot", TOKEN_OP_BITWISE_NOT},
+    {"op_Increment", TOKEN_OP_INCREMENT},
+    {"op_Decrement", TOKEN_OP_DECREMENT},
+    {"op_True", TOKEN_OP_TRUE},
+    {"op_False", TOKEN_OP_FALSE},
+    {"op_Implicit", TOKEN_OP_IMPLICIT},
+    {"op_Explicit", TOKEN_OP_EXPLICIT},
     {NULL, 0}
 };
 
@@ -432,7 +478,7 @@ Token lexer_next_token(Lexer* lexer) {
                 lexer_advance(lexer);
                 return lexer_create_token(TOKEN_OR, "||", line, column);
             }
-            return lexer_create_token(TOKEN_BITWISE_OR, "|", line, column);
+            return lexer_create_token(TOKEN_PIPE, "|", line, column);
         case '^':
             lexer_advance(lexer);
             return lexer_create_token(TOKEN_BITWISE_XOR, "^", line, column);
@@ -442,6 +488,9 @@ Token lexer_next_token(Lexer* lexer) {
         case ')':
             lexer_advance(lexer);
             return lexer_create_token(TOKEN_RIGHT_PAREN, ")", line, column);
+        case '$':
+            lexer_advance(lexer);
+            return lexer_create_token(TOKEN_DOLLAR, "$", line, column);
         case '{':
             lexer_advance(lexer);
             return lexer_create_token(TOKEN_LEFT_BRACE, "{", line, column);
@@ -478,6 +527,14 @@ Token lexer_next_token(Lexer* lexer) {
                 lexer_advance(lexer);
                 lexer_advance(lexer);
                 return lexer_create_token(TOKEN_QUESTION_COLON, "?:", line, column);
+            } else if (lexer->source[lexer->position + 1] == '?') {
+                lexer_advance(lexer);
+                lexer_advance(lexer);
+                return lexer_create_token(TOKEN_NULL_COALESCING, "??", line, column);
+            } else if (lexer->source[lexer->position + 1] == '.') {
+                lexer_advance(lexer);
+                lexer_advance(lexer);
+                return lexer_create_token(TOKEN_QUESTION_DOT, "?.", line, column);
             } else {
                 lexer_advance(lexer);
                 return lexer_create_token(TOKEN_QUESTION, "?", line, column);
@@ -593,6 +650,16 @@ const char* token_type_to_string(KrtTokenType type) {
             return "TRUE";
         case TOKEN_FALSE:
             return "FALSE";
+        case TOKEN_NULL:
+            return "NULL";
+        case TOKEN_UNDERSCORE:
+            return "UNDERSCORE";
+        case TOKEN_FIXED:
+            return "FIXED";
+        case TOKEN_ASYNC:
+            return "ASYNC";
+        case TOKEN_AWAIT:
+            return "AWAIT";
         case TOKEN_AND:
             return "AND";
         case TOKEN_OR:
@@ -700,7 +767,10 @@ const char* token_type_to_string(KrtTokenType type) {
             return "MOD_ASSIGN";
         case TOKEN_ARROW:
             return "ARROW";
-        
+        case TOKEN_PIPE:
+            return "PIPE";
+        case TOKEN_DOLLAR:
+            return "DOLLAR";
         case TOKEN_GET:
             return "GET";
         case TOKEN_SET:
@@ -725,6 +795,84 @@ const char* token_type_to_string(KrtTokenType type) {
             return "INTO";
         case TOKEN_LAMBDA:
             return "LAMBDA";
+        case TOKEN_IS:
+            return "IS";
+        case TOKEN_AS:
+            return "AS";
+        case TOKEN_YIELD:
+            return "YIELD";
+        case TOKEN_LOCK:
+            return "LOCK";
+        case TOKEN_MATCH:
+            return "MATCH";
+        case TOKEN_WITH:
+            return "WITH";
+        case TOKEN_WHEN:
+            return "WHEN";
+        case TOKEN_PARAMS:
+            return "PARAMS";
+        case TOKEN_WHERE:
+            return "WHERE";
+        case TOKEN_OPERATOR:
+            return "OPERATOR";
+        case TOKEN_DELEGATE:
+            return "DELEGATE";
+        case TOKEN_SIZEOF:
+            return "SIZEOF";
+        case TOKEN_STACKALLOC:
+            return "STACKALLOC";
+        case TOKEN_OP_ADDITION:
+            return "op_Addition";
+        case TOKEN_OP_SUBTRACTION:
+            return "op_Subtraction";
+        case TOKEN_OP_MULTIPLY:
+            return "op_Multiply";
+        case TOKEN_OP_DIVISION:
+            return "op_Division";
+        case TOKEN_OP_MODULO:
+            return "op_Modulo";
+        case TOKEN_OP_EQUALITY:
+            return "op_Equality";
+        case TOKEN_OP_INEQUALITY:
+            return "op_Inequality";
+        case TOKEN_OP_LESS:
+            return "op_LessThan";
+        case TOKEN_OP_GREATER:
+            return "op_GreaterThan";
+        case TOKEN_OP_LESS_EQUAL:
+            return "op_LessThanOrEqual";
+        case TOKEN_OP_GREATER_EQUAL:
+            return "op_GreaterThanOrEqual";
+        case TOKEN_OP_BITWISE_AND:
+            return "op_BitwiseAnd";
+        case TOKEN_OP_BITWISE_OR:
+            return "op_BitwiseOr";
+        case TOKEN_OP_BITWISE_XOR:
+            return "op_BitwiseXor";
+        case TOKEN_OP_LEFT_SHIFT:
+            return "op_LeftShift";
+        case TOKEN_OP_RIGHT_SHIFT:
+            return "op_RightShift";
+        case TOKEN_OP_UNARY_PLUS:
+            return "op_UnaryPlus";
+        case TOKEN_OP_UNARY_MINUS:
+            return "op_UnaryMinus";
+        case TOKEN_OP_LOGICAL_NOT:
+            return "op_LogicalNot";
+        case TOKEN_OP_BITWISE_NOT:
+            return "op_BitwiseNot";
+        case TOKEN_OP_INCREMENT:
+            return "op_Increment";
+        case TOKEN_OP_DECREMENT:
+            return "op_Decrement";
+        case TOKEN_OP_TRUE:
+            return "op_True";
+        case TOKEN_OP_FALSE:
+            return "op_False";
+        case TOKEN_OP_IMPLICIT:
+            return "op_Implicit";
+        case TOKEN_OP_EXPLICIT:
+            return "op_Explicit";
         default:
             return "UNKNOWN";
     }

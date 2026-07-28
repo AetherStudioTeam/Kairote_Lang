@@ -117,6 +117,7 @@ bool generics_is_generic_type(GenericRegistry* registry, const char* type_name) 
 }
 
 bool generics_validate_instantiation(GenericType* generic_type, const char** type_args, int arg_count) {
+    (void)type_args;
     if (!generic_type) return false;
     return arg_count == generic_type->parameter_count;
 }

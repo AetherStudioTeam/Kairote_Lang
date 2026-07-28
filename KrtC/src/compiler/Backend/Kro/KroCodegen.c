@@ -152,10 +152,6 @@ static void emit_call_local(KROCodegenContext* ctx, const char* func_name) {
     kro_add_reloc(ctx->writer, KRO_SEC_TEXT, call_offset + 1, sym_idx, KRO_RELOC_PC32, 0);
 }
 
-static void emit_return(KROCodegenContext* ctx) {
-    emit_function_epilogue(ctx);
-}
-
 static void emit_binary_op(KROCodegenContext* ctx, int op) {
     
     switch (op) {
@@ -373,6 +369,7 @@ static void KroGenerateBlock(KROCodegenContext* ctx, KrtIRBasicBlock* block) {
 }
 
 static int calculate_function_stack_size(KrtIRFunction* func) {
+    (void)func;
     int stack_size = 32;  
 
     stack_size += 8;
@@ -386,29 +383,10 @@ static int calculate_function_stack_size(KrtIRFunction* func) {
     return stack_size;
 }
 
-static void emit_call_exit_process(KROCodegenContext* ctx) {
-    
-    emit_bytes(ctx, (const uint8_t*)"\x48\x89\xC1", 3);  
-
-    int32_t sym_idx = kro_find_symbol(ctx->writer, "ExitProcess");
-    if (sym_idx < 0) {
-        sym_idx = kro_add_import_symbol(ctx->writer, "ExitProcess", "kernel32.dll");
-    }
-
-    uint32_t mov_offset = kro_get_code_offset(ctx->writer);
-
-    emit_bytes(ctx, (const uint8_t*)"\x48\x8B\x05", 3);  
-    emit_u32(ctx, 0);
-    
-    kro_add_reloc(ctx->writer, KRO_SEC_TEXT, mov_offset + 3, sym_idx, KRO_RELOC_PC32, 0);
-    
-    emit_bytes(ctx, (const uint8_t*)"\xFF\xD0", 2);  
-}
-
 static void KroGenerateFunction(KROCodegenContext* ctx, KrtIRFunction* func, KrtIRModule* module) {
     if (!func) return;
 
-    uint32_t func_offset = kro_get_code_offset(ctx->writer);
+    (void)kro_get_code_offset(ctx->writer);
 
     int is_main = (strcmp(func->name, "main") == 0);
     int is_mangled_main = (strcmp(func->name, "_ZN4mainEv") == 0);
@@ -555,6 +533,35 @@ void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule*
     }
 
     kro_set_code_offset(ctx.writer, 0);
+
+#ifdef __linux__
+    /* Generate a tiny _start stub for ELF executables.
+     * _start -> call _ZN4mainEv -> mov edi,eax -> mov eax,60 -> syscall */
+    int main_sym_idx = kro_find_symbol(ctx.writer, "_ZN4mainEv");
+    if (main_sym_idx < 0) {
+        main_sym_idx = kro_find_symbol(ctx.writer, "main");
+    }
+    if (main_sym_idx >= 0) {
+        uint32_t start_offset = kro_get_code_offset(ctx.writer);
+        kro_add_symbol(ctx.writer, "_start", KRO_SYM_FUNC, KRO_BIND_GLOBAL, KRO_SEC_TEXT, start_offset);
+
+        /* call _ZN4mainEv (rel32, patched by PC32 reloc) */
+        emit_byte(&ctx, 0xE8);
+        uint32_t call_reloc_offset = kro_get_code_offset(ctx.writer);
+        emit_u32(&ctx, 0);
+        kro_add_reloc(ctx.writer, KRO_SEC_TEXT, call_reloc_offset, main_sym_idx, KRO_RELOC_PC32, 0);
+
+        /* mov edi, eax */
+        emit_bytes(&ctx, (const uint8_t*)"\x89\xC7", 2);
+        /* mov eax, 60 (sys_exit) */
+        emit_bytes(&ctx, (const uint8_t*)"\xB8\x3C\x00\x00\x00", 5);
+        /* syscall */
+        emit_bytes(&ctx, (const uint8_t*)"\x0F\x05", 2);
+
+        kro_set_entry_point(ctx.writer, start_offset);
+    }
+#endif
+
     func_idx = 0;
     func = module->functions;
     while (func) {
@@ -564,9 +571,11 @@ void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule*
 
         int is_main = (strcmp(func->name, "main") == 0);
         int is_mangled_main = (strcmp(func->name, "_ZN4mainEv") == 0);
+#ifndef __linux__
         if (is_main || is_mangled_main) {
             kro_set_entry_point(ctx.writer, actual_offset);
         }
+#endif
 
         KroGenerateFunction(&ctx, func, module);
         func = func->next;

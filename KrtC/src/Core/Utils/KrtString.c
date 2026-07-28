@@ -5,6 +5,15 @@
 
 #ifndef _WIN32
 
+void KrtError(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+}
+
+#endif
+
 char* KrtStrcpySafe(char* dest, size_t dest_size, const char* src) {
     if (!dest || dest_size == 0) return NULL;
     if (!src) {
@@ -62,7 +71,6 @@ int KrtSprintfSafe(char* buffer, size_t buffer_size, const char* format, ...) {
     
     return result;
 }
-#endif 
 
 size_t KrtStrlcpy(char* dest, const char* src, size_t dest_size) {
     if (!dest || dest_size == 0) return 0;

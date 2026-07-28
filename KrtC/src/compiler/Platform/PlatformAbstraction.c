@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "PlatformAbstraction.h"
-#include "../../Core/Utils/logger.h"
+#include "../../Core/Utils/Logger.h"
 
 #ifdef _WIN32
 #include <windows.h>

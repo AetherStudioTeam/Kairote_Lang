@@ -1,0 +1,1245 @@
+namespace System.Linq
+
+public static class Enumerable
+{
+    public static function Where<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        var result = new List<TSource>()
+        for var item in source
+        {
+            if predicate(item)
+            {
+                result.Add(item)
+            }
+        }
+        return result
+    }
+
+    public static function Where<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, int32, bool>): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        var result = new List<TSource>()
+        var index = 0
+        for var item in source
+        {
+            if predicate(item, index)
+            {
+                result.Add(item)
+            }
+            index = index + 1
+        }
+        return result
+    }
+
+    public static function Select<TSource, TResult>(source: IEnumerable<TSource>, selector: Func<TSource, TResult>): IEnumerable<TResult>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if selector == null
+        {
+            throw new ArgumentNullException("selector")
+        }
+        var result = new List<TResult>()
+        for var item in source
+        {
+            result.Add(selector(item))
+        }
+        return result
+    }
+
+    public static function Select<TSource, TResult>(source: IEnumerable<TSource>, selector: Func<TSource, int32, TResult>): IEnumerable<TResult>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if selector == null
+        {
+            throw new ArgumentNullException("selector")
+        }
+        var result = new List<TResult>()
+        var index = 0
+        for var item in source
+        {
+            result.Add(selector(item, index))
+            index = index + 1
+        }
+        return result
+    }
+
+    public static function SelectMany<TSource, TResult>(source: IEnumerable<TSource>, selector: Func<TSource, IEnumerable<TResult>>): IEnumerable<TResult>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if selector == null
+        {
+            throw new ArgumentNullException("selector")
+        }
+        var result = new List<TResult>()
+        for var item in source
+        {
+            for var subItem in selector(item)
+            {
+                result.Add(subItem)
+            }
+        }
+        return result
+    }
+
+    public static function Take<TSource>(source: IEnumerable<TSource>, count: int32): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var result = new List<TSource>()
+        var index = 0
+        for var item in source
+        {
+            if index >= count
+            {
+                break
+            }
+            result.Add(item)
+            index = index + 1
+        }
+        return result
+    }
+
+    public static function Skip<TSource>(source: IEnumerable<TSource>, count: int32): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var result = new List<TSource>()
+        var index = 0
+        for var item in source
+        {
+            if index >= count
+            {
+                result.Add(item)
+            }
+            index = index + 1
+        }
+        return result
+    }
+
+    public static function TakeWhile<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        var result = new List<TSource>()
+        for var item in source
+        {
+            if !predicate(item)
+            {
+                break
+            }
+            result.Add(item)
+        }
+        return result
+    }
+
+    public static function SkipWhile<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        var result = new List<TSource>()
+        var skipping = true
+        for var item in source
+        {
+            if skipping && !predicate(item)
+            {
+                skipping = false
+            }
+            if !skipping
+            {
+                result.Add(item)
+            }
+        }
+        return result
+    }
+
+    public static function OrderBy<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>): IOrderedEnumerable<TSource>
+    {
+        return Enumerable.OrderBy(source, keySelector, Comparer<TKey>.Default)
+    }
+
+    public static function OrderBy<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>, comparer: IComparer<TKey>): IOrderedEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if keySelector == null
+        {
+            throw new ArgumentNullException("keySelector")
+        }
+        var list = new List<TSource>()
+        for var item in source
+        {
+            list.Add(item)
+        }
+        list.Sort((a, b) => comparer.Compare(keySelector(a), keySelector(b)))
+        return new OrderedEnumerable<TSource>(list)
+    }
+
+    public static function OrderByDescending<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>): IOrderedEnumerable<TSource>
+    {
+        return Enumerable.OrderByDescending(source, keySelector, Comparer<TKey>.Default)
+    }
+
+    public static function OrderByDescending<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>, comparer: IComparer<TKey>): IOrderedEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if keySelector == null
+        {
+            throw new ArgumentNullException("keySelector")
+        }
+        var list = new List<TSource>()
+        for var item in source
+        {
+            list.Add(item)
+        }
+        list.Sort((a, b) => comparer.Compare(keySelector(b), keySelector(a)))
+        return new OrderedEnumerable<TSource>(list)
+    }
+
+    public static function ThenBy<TSource, TKey>(source: IOrderedEnumerable<TSource>, keySelector: Func<TSource, TKey>): IOrderedEnumerable<TSource>
+    {
+        return source
+    }
+
+    public static function ThenByDescending<TSource, TKey>(source: IOrderedEnumerable<TSource>, keySelector: Func<TSource, TKey>): IOrderedEnumerable<TSource>
+    {
+        return source
+    }
+
+    public static function Reverse<TSource>(source: IEnumerable<TSource>): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var list = new List<TSource>()
+        for var item in source
+        {
+            list.Add(item)
+        }
+        list.Reverse()
+        return list
+    }
+
+    public static function GroupBy<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>): IEnumerable<IGrouping<TKey, TSource>>
+    {
+        return Enumerable.GroupBy(source, keySelector, EqualityComparer<TKey>.Default)
+    }
+
+    public static function GroupBy<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>, comparer: IEqualityComparer<TKey>): IEnumerable<IGrouping<TKey, TSource>>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if keySelector == null
+        {
+            throw new ArgumentNullException("keySelector")
+        }
+        var groups = new Dictionary<TKey, List<TSource>>(comparer)
+        for var item in source
+        {
+            var key = keySelector(item)
+            if !groups.ContainsKey(key)
+            {
+                groups[key] = new List<TSource>()
+            }
+            groups[key].Add(item)
+        }
+        var result = new List<IGrouping<TKey, TSource>>()
+        for var pair in groups
+        {
+            result.Add(new Grouping<TKey, TSource>(pair.Key, pair.Value))
+        }
+        return result
+    }
+
+    public static function Join<TOuter, TInner, TKey, TResult>(outer: IEnumerable<TOuter>, inner: IEnumerable<TInner>, outerKeySelector: Func<TOuter, TKey>, innerKeySelector: Func<TInner, TKey>, resultSelector: Func<TOuter, TInner, TResult>): IEnumerable<TResult>
+    {
+        return Enumerable.Join(outer, inner, outerKeySelector, innerKeySelector, resultSelector, EqualityComparer<TKey>.Default)
+    }
+
+    public static function Join<TOuter, TInner, TKey, TResult>(outer: IEnumerable<TOuter>, inner: IEnumerable<TInner>, outerKeySelector: Func<TOuter, TKey>, innerKeySelector: Func<TInner, TKey>, resultSelector: Func<TOuter, TInner, TResult>, comparer: IEqualityComparer<TKey>): IEnumerable<TResult>
+    {
+        if outer == null
+        {
+            throw new ArgumentNullException("outer")
+        }
+        if inner == null
+        {
+            throw new ArgumentNullException("inner")
+        }
+        if outerKeySelector == null
+        {
+            throw new ArgumentNullException("outerKeySelector")
+        }
+        if innerKeySelector == null
+        {
+            throw new ArgumentNullException("innerKeySelector")
+        }
+        if resultSelector == null
+        {
+            throw new ArgumentNullException("resultSelector")
+        }
+        var innerLookup = new Dictionary<TKey, List<TInner>>(comparer)
+        for var item in inner
+        {
+            var key = innerKeySelector(item)
+            if !innerLookup.ContainsKey(key)
+            {
+                innerLookup[key] = new List<TInner>()
+            }
+            innerLookup[key].Add(item)
+        }
+        var result = new List<TResult>()
+        for var outerItem in outer
+        {
+            var key = outerKeySelector(outerItem)
+            if innerLookup.ContainsKey(key)
+            {
+                for var innerItem in innerLookup[key]
+                {
+                    result.Add(resultSelector(outerItem, innerItem))
+                }
+            }
+        }
+        return result
+    }
+
+    public static function ToList<TSource>(source: IEnumerable<TSource>): List<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var list = new List<TSource>()
+        for var item in source
+        {
+            list.Add(item)
+        }
+        return list
+    }
+
+    public static function ToArray<TSource>(source: IEnumerable<TSource>): TSource[]
+    {
+        return Enumerable.ToList(source).ToArray()
+    }
+
+    public static function ToDictionary<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>): Dictionary<TKey, TSource>
+    {
+        return Enumerable.ToDictionary(source, keySelector, EqualityComparer<TKey>.Default)
+    }
+
+    public static function ToDictionary<TSource, TKey>(source: IEnumerable<TSource>, keySelector: Func<TSource, TKey>, comparer: IEqualityComparer<TKey>): Dictionary<TKey, TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if keySelector == null
+        {
+            throw new ArgumentNullException("keySelector")
+        }
+        var dict = new Dictionary<TKey, TSource>(comparer)
+        for var item in source
+        {
+            dict.Add(keySelector(item), item)
+        }
+        return dict
+    }
+
+    public static function First<TSource>(source: IEnumerable<TSource>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        for var item in source
+        {
+            return item
+        }
+        throw new InvalidOperationException("Sequence contains no elements")
+    }
+
+    public static function First<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        for var item in source
+        {
+            if predicate(item)
+            {
+                return item
+            }
+        }
+        throw new InvalidOperationException("Sequence contains no matching elements")
+    }
+
+    public static function FirstOrDefault<TSource>(source: IEnumerable<TSource>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        for var item in source
+        {
+            return item
+        }
+        return default(TSource)
+    }
+
+    public static function FirstOrDefault<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        for var item in source
+        {
+            if predicate(item)
+            {
+                return item
+            }
+        }
+        return default(TSource)
+    }
+
+    public static function Last<TSource>(source: IEnumerable<TSource>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var last = default(TSource)
+        var found = false
+        for var item in source
+        {
+            last = item
+            found = true
+        }
+        if !found
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return last
+    }
+
+    public static function LastOrDefault<TSource>(source: IEnumerable<TSource>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var last = default(TSource)
+        for var item in source
+        {
+            last = item
+        }
+        return last
+    }
+
+    public static function Single<TSource>(source: IEnumerable<TSource>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var result = default(TSource)
+        var count = 0
+        for var item in source
+        {
+            if count == 1
+            {
+                throw new InvalidOperationException("Sequence contains more than one element")
+            }
+            result = item
+            count = count + 1
+        }
+        if count == 0
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return result
+    }
+
+    public static function SingleOrDefault<TSource>(source: IEnumerable<TSource>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var result = default(TSource)
+        var count = 0
+        for var item in source
+        {
+            if count == 1
+            {
+                throw new InvalidOperationException("Sequence contains more than one element")
+            }
+            result = item
+            count = count + 1
+        }
+        return result
+    }
+
+    public static function ElementAt<TSource>(source: IEnumerable<TSource>, index: int32): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if index < 0
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        var current = 0
+        for var item in source
+        {
+            if current == index
+            {
+                return item
+            }
+            current = current + 1
+        }
+        throw new ArgumentOutOfRangeException("index")
+    }
+
+    public static function ElementAtOrDefault<TSource>(source: IEnumerable<TSource>, index: int32): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if index < 0
+        {
+            return default(TSource)
+        }
+        var current = 0
+        for var item in source
+        {
+            if current == index
+            {
+                return item
+            }
+            current = current + 1
+        }
+        return default(TSource)
+    }
+
+    public static function Any<TSource>(source: IEnumerable<TSource>): bool
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        for var item in source
+        {
+            return true
+        }
+        return false
+    }
+
+    public static function Any<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): bool
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        for var item in source
+        {
+            if predicate(item)
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    public static function All<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): bool
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        for var item in source
+        {
+            if !predicate(item)
+            {
+                return false
+            }
+        }
+        return true
+    }
+
+    public static function Count<TSource>(source: IEnumerable<TSource>): int32
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var count = 0
+        for var item in source
+        {
+            count = count + 1
+        }
+        return count
+    }
+
+    public static function Count<TSource>(source: IEnumerable<TSource>, predicate: Func<TSource, bool>): int32
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if predicate == null
+        {
+            throw new ArgumentNullException("predicate")
+        }
+        var count = 0
+        for var item in source
+        {
+            if predicate(item)
+            {
+                count = count + 1
+            }
+        }
+        return count
+    }
+
+    public static function LongCount<TSource>(source: IEnumerable<TSource>): int64
+    {
+        return int64(Enumerable.Count(source))
+    }
+
+    public static function Contains<TSource>(source: IEnumerable<TSource>, value: TSource): bool
+    {
+        return Enumerable.Contains(source, value, EqualityComparer<TSource>.Default)
+    }
+
+    public static function Contains<TSource>(source: IEnumerable<TSource>, value: TSource>, comparer: IEqualityComparer<TSource>): bool
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        for var item in source
+        {
+            if comparer.Equals(item, value)
+            {
+                return true
+            }
+        }
+        return false
+    }
+
+    public static function Aggregate<TSource>(source: IEnumerable<TSource>, func: Func<TSource, TSource, TSource>): TSource
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if func == null
+        {
+            throw new ArgumentNullException("func")
+        }
+        var result = default(TSource)
+        var first = true
+        for var item in source
+        {
+            if first
+            {
+                result = item
+                first = false
+            }
+            else
+            {
+                result = func(result, item)
+            }
+        }
+        if first
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return result
+    }
+
+    public static function Aggregate<TSource, TAccumulate>(source: IEnumerable<TSource>, seed: TAccumulate, func: Func<TAccumulate, TSource, TAccumulate>): TAccumulate
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        if func == null
+        {
+            throw new ArgumentNullException("func")
+        }
+        var result = seed
+        for var item in source
+        {
+            result = func(result, item)
+        }
+        return result
+    }
+
+    public static function Sum(source: IEnumerable<int32>): int32
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var sum = 0
+        for var item in source
+        {
+            sum = sum + item
+        }
+        return sum
+    }
+
+    public static function Sum(source: IEnumerable<int64>): int64
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var sum = int64(0)
+        for var item in source
+        {
+            sum = sum + item
+        }
+        return sum
+    }
+
+    public static function Sum(source: IEnumerable<float32>): float32
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var sum = float32(0)
+        for var item in source
+        {
+            sum = sum + item
+        }
+        return sum
+    }
+
+    public static function Sum(source: IEnumerable<float64>): float64
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var sum = float64(0)
+        for var item in source
+        {
+            sum = sum + item
+        }
+        return sum
+    }
+
+    public static function Average(source: IEnumerable<int32>): float64
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var sum = int64(0)
+        var count = 0
+        for var item in source
+        {
+            sum = sum + int64(item)
+            count = count + 1
+        }
+        if count == 0
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return float64(sum) / float64(count)
+    }
+
+    public static function Average(source: IEnumerable<float64>): float64
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var sum = float64(0)
+        var count = 0
+        for var item in source
+        {
+            sum = sum + item
+            count = count + 1
+        }
+        if count == 0
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return sum / float64(count)
+    }
+
+    public static function Min(source: IEnumerable<int32>): int32
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var min = 0
+        var first = true
+        for var item in source
+        {
+            if first || item < min
+            {
+                min = item
+                first = false
+            }
+        }
+        if first
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return min
+    }
+
+    public static function Min(source: IEnumerable<float64>): float64
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var min = float64(0)
+        var first = true
+        for var item in source
+        {
+            if first || item < min
+            {
+                min = item
+                first = false
+            }
+        }
+        if first
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return min
+    }
+
+    public static function Max(source: IEnumerable<int32>): int32
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var max = 0
+        var first = true
+        for var item in source
+        {
+            if first || item > max
+            {
+                max = item
+                first = false
+            }
+        }
+        if first
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return max
+    }
+
+    public static function Max(source: IEnumerable<float64>): float64
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var max = float64(0)
+        var first = true
+        for var item in source
+        {
+            if first || item > max
+            {
+                max = item
+                first = false
+            }
+        }
+        if first
+        {
+            throw new InvalidOperationException("Sequence contains no elements")
+        }
+        return max
+    }
+
+    public static function Distinct<TSource>(source: IEnumerable<TSource>): IEnumerable<TSource>
+    {
+        return Enumerable.Distinct(source, EqualityComparer<TSource>.Default)
+    }
+
+    public static function Distinct<TSource>(source: IEnumerable<TSource>, comparer: IEqualityComparer<TSource>): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var seen = new Dictionary<TSource, bool>(comparer)
+        var result = new List<TSource>()
+        for var item in source
+        {
+            if !seen.ContainsKey(item)
+            {
+                seen[item] = true
+                result.Add(item)
+            }
+        }
+        return result
+    }
+
+    public static function Union<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>): IEnumerable<TSource>
+    {
+        return Enumerable.Union(first, second, EqualityComparer<TSource>.Default)
+    }
+
+    public static function Union<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>, comparer: IEqualityComparer<TSource>): IEnumerable<TSource>
+    {
+        if first == null
+        {
+            throw new ArgumentNullException("first")
+        }
+        if second == null
+        {
+            throw new ArgumentNullException("second")
+        }
+        var seen = new Dictionary<TSource, bool>(comparer)
+        var result = new List<TSource>()
+        for var item in first
+        {
+            if !seen.ContainsKey(item)
+            {
+                seen[item] = true
+                result.Add(item)
+            }
+        }
+        for var item in second
+        {
+            if !seen.ContainsKey(item)
+            {
+                seen[item] = true
+                result.Add(item)
+            }
+        }
+        return result
+    }
+
+    public static function Intersect<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>): IEnumerable<TSource>
+    {
+        return Enumerable.Intersect(first, second, EqualityComparer<TSource>.Default)
+    }
+
+    public static function Intersect<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>, comparer: IEqualityComparer<TSource>): IEnumerable<TSource>
+    {
+        if first == null
+        {
+            throw new ArgumentNullException("first")
+        }
+        if second == null
+        {
+            throw new ArgumentNullException("second")
+        }
+        var secondSet = new Dictionary<TSource, bool>(comparer)
+        for var item in second
+        {
+            secondSet[item] = true
+        }
+        var seen = new Dictionary<TSource, bool>(comparer)
+        var result = new List<TSource>()
+        for var item in first
+        {
+            if secondSet.ContainsKey(item) && !seen.ContainsKey(item)
+            {
+                seen[item] = true
+                result.Add(item)
+            }
+        }
+        return result
+    }
+
+    public static function Except<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>): IEnumerable<TSource>
+    {
+        return Enumerable.Except(first, second, EqualityComparer<TSource>.Default)
+    }
+
+    public static function Except<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>, comparer: IEqualityComparer<TSource>): IEnumerable<TSource>
+    {
+        if first == null
+        {
+            throw new ArgumentNullException("first")
+        }
+        if second == null
+        {
+            throw new ArgumentNullException("second")
+        }
+        var secondSet = new Dictionary<TSource, bool>(comparer)
+        for var item in second
+        {
+            secondSet[item] = true
+        }
+        var result = new List<TSource>()
+        for var item in first
+        {
+            if !secondSet.ContainsKey(item)
+            {
+                result.Add(item)
+            }
+        }
+        return result
+    }
+
+    public static function Concat<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>): IEnumerable<TSource>
+    {
+        if first == null
+        {
+            throw new ArgumentNullException("first")
+        }
+        if second == null
+        {
+            throw new ArgumentNullException("second")
+        }
+        var result = new List<TSource>()
+        for var item in first
+        {
+            result.Add(item)
+        }
+        for var item in second
+        {
+            result.Add(item)
+        }
+        return result
+    }
+
+    public static function SequenceEqual<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>): bool
+    {
+        return Enumerable.SequenceEqual(first, second, EqualityComparer<TSource>.Default)
+    }
+
+    public static function SequenceEqual<TSource>(first: IEnumerable<TSource>, second: IEnumerable<TSource>, comparer: IEqualityComparer<TSource>): bool
+    {
+        if first == null
+        {
+            throw new ArgumentNullException("first")
+        }
+        if second == null
+        {
+            throw new ArgumentNullException("second")
+        }
+        var e1 = first.GetEnumerator()
+        var e2 = second.GetEnumerator()
+        while e1.MoveNext()
+        {
+            if !e2.MoveNext()
+            {
+                return false
+            }
+            if !comparer.Equals(e1.Current, e2.Current)
+            {
+                return false
+            }
+        }
+        return !e2.MoveNext()
+    }
+
+    public static function DefaultIfEmpty<TSource>(source: IEnumerable<TSource>): IEnumerable<TSource>
+    {
+        return Enumerable.DefaultIfEmpty(source, default(TSource))
+    }
+
+    public static function DefaultIfEmpty<TSource>(source: IEnumerable<TSource>, defaultValue: TSource): IEnumerable<TSource>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var result = new List<TSource>()
+        var hasElements = false
+        for var item in source
+        {
+            result.Add(item)
+            hasElements = true
+        }
+        if !hasElements
+        {
+            result.Add(defaultValue)
+        }
+        return result
+    }
+
+    public static function Empty<TSource>(): IEnumerable<TSource>
+    {
+        return new List<TSource>()
+    }
+
+    public static function Range(start: int32, count: int32): IEnumerable<int32>
+    {
+        if count < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        var result = new List<int32>()
+        for var i = 0; i < count; i = i + 1
+        {
+            result.Add(start + i)
+        }
+        return result
+    }
+
+    public static function Repeat<TResult>(element: TResult, count: int32): IEnumerable<TResult>
+    {
+        if count < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        var result = new List<TResult>()
+        for var i = 0; i < count; i = i + 1
+        {
+            result.Add(element)
+        }
+        return result
+    }
+
+    public static function Cast<TResult>(source: IEnumerable): IEnumerable<TResult>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var result = new List<TResult>()
+        for var item in source
+        {
+            result.Add(TResult(item))
+        }
+        return result
+    }
+
+    public static function OfType<TResult>(source: IEnumerable): IEnumerable<TResult>
+    {
+        if source == null
+        {
+            throw new ArgumentNullException("source")
+        }
+        var result = new List<TResult>()
+        for var item in source
+        {
+            if item is TResult)
+            {
+                result.Add(TResult(item))
+            }
+        }
+        return result
+    }
+}
+
+public interface IOrderedEnumerable<TElement> : IEnumerable<TElement>
+{
+}
+
+public class OrderedEnumerable<TElement> : IOrderedEnumerable<TElement>
+{
+    private var list: List<TElement>
+
+    public function OrderedEnumerable(list: List<TElement>)
+    {
+        this.list = list
+    }
+
+    public function GetEnumerator(): IEnumerator<TElement>
+    {
+        return this.list.GetEnumerator()
+    }
+}
+
+public interface IGrouping<TKey, TElement> : IEnumerable<TElement>
+{
+    function get_Key(): TKey
+}
+
+public class Grouping<TKey, TElement> : IGrouping<TKey, TElement>
+{
+    private var key: TKey
+    private var elements: List<TElement>
+
+    public function Grouping(key: TKey, elements: List<TElement>)
+    {
+        this.key = key
+        this.elements = elements
+    }
+
+    public function get_Key(): TKey
+    {
+        return this.key
+    }
+
+    public function GetEnumerator(): IEnumerator<TElement>
+    {
+        return this.elements.GetEnumerator()
+    }
+}

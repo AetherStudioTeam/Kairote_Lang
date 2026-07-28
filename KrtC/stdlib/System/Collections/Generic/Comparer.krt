@@ -1,0 +1,226 @@
+namespace System.Collections.Generic
+
+public interface IComparer<T>
+{
+    function Compare(x: T, y: T): int32
+}
+
+public interface IEqualityComparer<T>
+{
+    function Equals(x: T, y: T): bool
+    function GetHashCode(obj: T): int32
+}
+
+public class Comparer<T> : IComparer<T>
+{
+    public static var Default: Comparer<T> = new Comparer<T>()
+
+    public function Compare(x: T, y: T): int32
+    {
+        if x == null && y == null)
+        {
+            return 0
+        }
+        if x == null)
+        {
+            return -1
+        }
+        if y == null)
+        {
+            return 1
+        }
+        if x is IComparable<T>)
+        {
+            return IComparable<T>(x).CompareTo(y)
+        }
+        if x is IComparable)
+        {
+            return IComparable(x).CompareTo(y)
+        }
+        throw new ArgumentException("Type does not implement IComparable")
+    }
+}
+
+public class EqualityComparer<T> : IEqualityComparer<T>
+{
+    public static var Default: EqualityComparer<T> = new EqualityComparer<T>()
+
+    public function Equals(x: T, y: T): bool
+    {
+        if x == null && y == null)
+        {
+            return true
+        }
+        if x == null || y == null)
+        {
+            return false
+        }
+        if x is IEquatable<T>)
+        {
+            return IEquatable<T>(x).Equals(y)
+        }
+        return x.Equals(y)
+    }
+
+    public function GetHashCode(obj: T): int32
+    {
+        if obj == null)
+        {
+            return 0
+        }
+        return obj.GetHashCode()
+    }
+}
+
+public class Int32Comparer : IComparer<int32>
+{
+    public function Compare(x: int32, y: int32): int32
+    {
+        if x < y)
+        {
+            return -1
+        }
+        if x > y)
+        {
+            return 1
+        }
+        return 0
+    }
+}
+
+public class Int64Comparer : IComparer<int64>
+{
+    public function Compare(x: int64, y: int64): int32
+    {
+        if x < y)
+        {
+            return -1
+        }
+        if x > y)
+        {
+            return 1
+        }
+        return 0
+    }
+}
+
+public class Float32Comparer : IComparer<float32>
+{
+    public function Compare(x: float32, y: float32): int32
+    {
+        if x < y)
+        {
+            return -1
+        }
+        if x > y)
+        {
+            return 1
+        }
+        return 0
+    }
+}
+
+public class Float64Comparer : IComparer<float64>
+{
+    public function Compare(x: float64, y: float64): int32
+    {
+        if x < y)
+        {
+            return -1
+        }
+        if x > y)
+        {
+            return 1
+        }
+        return 0
+    }
+}
+
+public class StringComparer : IComparer<string>, IEqualityComparer<string>
+{
+    public static var Ordinal: StringComparer = new StringComparer()
+    public static var OrdinalIgnoreCase: StringComparer = new StringComparerIgnoreCase()
+    public static var CurrentCulture: StringComparer = new StringComparer()
+    public static var CurrentCultureIgnoreCase: StringComparer = new StringComparerIgnoreCase()
+
+    public function Compare(x: string, y: string): int32
+    {
+        if x == null && y == null)
+        {
+            return 0
+        }
+        if x == null)
+        {
+            return -1
+        }
+        if y == null)
+        {
+            return 1
+        }
+        return x.CompareTo(y)
+    }
+
+    public function Equals(x: string, y: string): bool
+    {
+        if x == null && y == null)
+        {
+            return true
+        }
+        if x == null || y == null)
+        {
+            return false
+        }
+        return x.Equals(y)
+    }
+
+    public function GetHashCode(obj: string): int32
+    {
+        if obj == null)
+        {
+            return 0
+        }
+        return obj.GetHashCode()
+    }
+}
+
+public class StringComparerIgnoreCase : StringComparer
+{
+    public function Compare(x: string, y: string): int32
+    {
+        if x == null && y == null)
+        {
+            return 0
+        }
+        if x == null)
+        {
+            return -1
+        }
+        if y == null)
+        {
+            return 1
+        }
+        return x.ToLower().CompareTo(y.ToLower())
+    }
+
+    public function Equals(x: string, y: string): bool
+    {
+        if x == null && y == null)
+        {
+            return true
+        }
+        if x == null || y == null)
+        {
+            return false
+        }
+        return x.ToLower().Equals(y.ToLower())
+    }
+
+    public function GetHashCode(obj: string): int32
+    {
+        if obj == null)
+        {
+            return 0
+        }
+        return obj.ToLower().GetHashCode()
+    }
+}

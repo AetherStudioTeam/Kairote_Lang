@@ -101,8 +101,7 @@ static int check_class_declaration(TypeCheckContext* ctx, ASTNode* stmt);
 static int check_try_statement(TypeCheckContext* ctx, ASTNode* stmt);
 static int check_throw_statement(TypeCheckContext* ctx, ASTNode* stmt);
 static int check_print_statement(TypeCheckContext* ctx, ASTNode* stmt);
-static int check_break_statement(TypeCheckContext* ctx, ASTNode* stmt);
-static int check_continue_statement(TypeCheckContext* ctx, ASTNode* stmt);
+
 static int check_constructor_declaration(TypeCheckContext* ctx, ASTNode* stmt);
 static int check_destructor_declaration(TypeCheckContext* ctx, ASTNode* stmt);
 static int check_namespace_declaration(TypeCheckContext* ctx, ASTNode* stmt);
@@ -552,56 +551,6 @@ TypeCheckSymbol* type_check_symbol_table_lookup(TypeCheckSymbolTable* table, con
     return NULL;
 }
 
-static void type_check_register_console(TypeCheckContext* context) {
-    if (!context) return;
-
-    ClassInfo* console_info = class_info_create("Console");
-    if (!console_info) return;
-
-    Type* void_type = type_create_basic(TYPE_VOID);
-    Type* string_type = type_create_basic(TYPE_STRING);
-    Type* int32_type = type_create_basic(TYPE_INT32);
-
-    Type** wl_params = (Type**)KRT_MALLOC(sizeof(Type*) * 1);
-    wl_params[0] = type_copy(string_type);
-    Type* wl_type = type_create_function(type_copy(void_type), wl_params, 1);
-    ClassMember wl_member = {"WriteLine", MEMBER_METHOD, ACCESS_PUBLIC, 1, wl_type};
-    class_info_add_member(console_info, wl_member);
-
-    Type** wli_params = (Type**)KRT_MALLOC(sizeof(Type*) * 1);
-    wli_params[0] = type_copy(int32_type);
-    Type* wli_type = type_create_function(type_copy(void_type), wli_params, 1);
-    ClassMember wli_member = {"WriteLine", MEMBER_METHOD, ACCESS_PUBLIC, 1, wli_type};
-    class_info_add_member(console_info, wli_member);
-
-    Type** w_params = (Type**)KRT_MALLOC(sizeof(Type*) * 1);
-    w_params[0] = type_copy(string_type);
-    Type* w_type = type_create_function(type_copy(void_type), w_params, 1);
-    ClassMember w_member = {"Write", MEMBER_METHOD, ACCESS_PUBLIC, 1, w_type};
-    class_info_add_member(console_info, w_member);
-
-    Type** wi_params = (Type**)KRT_MALLOC(sizeof(Type*) * 1);
-    wi_params[0] = type_copy(int32_type);
-    Type* wi_type = type_create_function(type_copy(void_type), wi_params, 1);
-    ClassMember wi_member = {"Write", MEMBER_METHOD, ACCESS_PUBLIC, 1, wi_type};
-    class_info_add_member(console_info, wi_member);
-
-    Type** wii_params = (Type**)KRT_MALLOC(sizeof(Type*) * 1);
-    wii_params[0] = type_copy(int32_type);
-    Type* wii_type = type_create_function(type_copy(void_type), wii_params, 1);
-    ClassMember wii_member = {"WriteInt", MEMBER_METHOD, ACCESS_PUBLIC, 1, wii_type};
-    class_info_add_member(console_info, wii_member);
-
-    Type* console_type = type_create_class("Console");
-    console_type->data.class.class_info = console_info;
-    TypeCheckSymbol console_symbol = {"Console", console_type, 1, 0, 0};
-    type_check_symbol_table_add(context->current_scope, console_symbol);
-
-    type_destroy(void_type);
-    type_destroy(string_type);
-    type_destroy(int32_type);
-}
-
 TypeCheckContext* type_check_context_create(void* semantic_analyzer) {
     TypeCheckContext* context = (TypeCheckContext*)KRT_MALLOC(sizeof(TypeCheckContext));
     if (!context) {
@@ -792,7 +741,7 @@ static Type* type_from_string(TypeCheckContext* context, const char* type_name) 
 
     TypeCheckSymbol* symbol = type_check_symbol_table_lookup(context->current_scope, type_name);
     if (symbol && symbol->type && symbol->type->kind == TYPE_CLASS) {
-        return type_create_class(type_name);
+        return type_copy(symbol->type);
     }
 
     return NULL;
@@ -803,6 +752,7 @@ static int type_check_handle_function_decl(TypeCheckContext* context,
                                            char** parameters,
                                            int parameter_count,
                                            KrtTokenType* parameter_types,
+                                           int* parameter_is_array,
                                            ASTNode* body,
                                            KrtTokenType return_type_token) {
 
@@ -822,7 +772,19 @@ static int type_check_handle_function_decl(TypeCheckContext* context,
 
         for (int i = 0; i < parameter_count; i++) {
             KrtTokenType token = parameter_types ? parameter_types[i] : TOKEN_UNKNOWN;
-            Type* param_type = type_create_from_token(token);
+            Type* param_type = NULL;
+            if (parameter_is_array && parameter_is_array[i]) {
+                Type* element_type = type_create_from_token(token);
+                if (!element_type) {
+                    context->scope_ownership = 0;
+                    context->current_scope = old_scope;
+                    return 0;
+                }
+                param_type = type_create_array(element_type, 0);
+                type_destroy(element_type);
+            } else {
+                param_type = type_create_from_token(token);
+            }
             if (!param_type) {
                 context->scope_ownership = 0;
                 context->current_scope = old_scope;
@@ -879,7 +841,18 @@ static int type_check_handle_function_decl(TypeCheckContext* context,
 
     for (int i = 0; i < parameter_count; i++) {
         KrtTokenType token = parameter_types ? parameter_types[i] : TOKEN_UNKNOWN;
-        Type* param_type = type_create_from_token(token);
+        Type* param_type = NULL;
+        if (parameter_is_array && parameter_is_array[i]) {
+            Type* element_type = type_create_from_token(token);
+            if (!element_type) {
+                type_destroy(func_type);
+                return 0;
+            }
+            param_type = type_create_array(element_type, 0);
+            type_destroy(element_type);
+        } else {
+            param_type = type_create_from_token(token);
+        }
         if (!param_type) {
             type_destroy(func_type);
             return 0;
@@ -1007,6 +980,7 @@ static int check_function_declaration(TypeCheckContext* context, ASTNode* statem
                                              statement->data.function_decl.parameters,
                                              statement->data.function_decl.parameter_count,
                                              statement->data.function_decl.parameter_types,
+                                             statement->data.function_decl.parameter_is_array,
                                              statement->data.function_decl.body,
                                              statement->data.function_decl.return_type)) {
             return 0;
@@ -1017,6 +991,7 @@ static int check_function_declaration(TypeCheckContext* context, ASTNode* statem
                                              statement->data.function_decl.parameters,
                                              statement->data.function_decl.parameter_count,
                                              statement->data.function_decl.parameter_types,
+                                             statement->data.function_decl.parameter_is_array,
                                              statement->data.function_decl.body,
                                              statement->data.function_decl.return_type)) {
             return 0;
@@ -1034,6 +1009,7 @@ static int check_static_function_declaration(TypeCheckContext* context, ASTNode*
                                              statement->data.static_function_decl.parameters,
                                              statement->data.static_function_decl.parameter_count,
                                              statement->data.static_function_decl.parameter_types,
+                                             statement->data.static_function_decl.parameter_is_array,
                                              statement->data.static_function_decl.body,
                                              statement->data.static_function_decl.return_type)) {
             return 0;
@@ -1044,6 +1020,7 @@ static int check_static_function_declaration(TypeCheckContext* context, ASTNode*
                                              statement->data.static_function_decl.parameters,
                                              statement->data.static_function_decl.parameter_count,
                                              statement->data.static_function_decl.parameter_types,
+                                             statement->data.static_function_decl.parameter_is_array,
                                              statement->data.static_function_decl.body,
                                              statement->data.static_function_decl.return_type)) {
             return 0;
@@ -1421,6 +1398,7 @@ int type_check_program(TypeCheckContext* context, ASTNode* program) {
                                                  statement->data.function_decl.parameters,
                                                  statement->data.function_decl.parameter_count,
                                                  statement->data.function_decl.parameter_types,
+                                                 statement->data.function_decl.parameter_is_array,
                                                  NULL,
                                                  statement->data.function_decl.return_type)) {
                 continue;
@@ -1431,6 +1409,7 @@ int type_check_program(TypeCheckContext* context, ASTNode* program) {
                                                  statement->data.static_function_decl.parameters,
                                                  statement->data.static_function_decl.parameter_count,
                                                  statement->data.static_function_decl.parameter_types,
+                                                 statement->data.static_function_decl.parameter_is_array,
                                                  NULL,
                                                  statement->data.static_function_decl.return_type)) {
                 continue;
@@ -1448,6 +1427,7 @@ int type_check_program(TypeCheckContext* context, ASTNode* program) {
                                                         ns_stmt->data.function_decl.parameters,
                                                         ns_stmt->data.function_decl.parameter_count,
                                                         ns_stmt->data.function_decl.parameter_types,
+                                                        ns_stmt->data.function_decl.parameter_is_array,
                                                         NULL,
                                                         ns_stmt->data.function_decl.return_type);
                     } else if (ns_stmt->type == AST_STATIC_FUNCTION_DECLARATION) {
@@ -1456,6 +1436,7 @@ int type_check_program(TypeCheckContext* context, ASTNode* program) {
                                                         ns_stmt->data.static_function_decl.parameters,
                                                         ns_stmt->data.static_function_decl.parameter_count,
                                                         ns_stmt->data.static_function_decl.parameter_types,
+                                                        ns_stmt->data.static_function_decl.parameter_is_array,
                                                         NULL,
                                                         ns_stmt->data.static_function_decl.return_type);
                     }
@@ -1716,6 +1697,17 @@ static Type* check_binary_operation(TypeCheckContext* ctx, ASTNode* expr) {
         case TOKEN_LESS_EQUAL:
         case TOKEN_GREATER_EQUAL:
             result_type = type_create_basic(TYPE_BOOL);
+            break;
+
+        case TOKEN_ASSIGN:
+            if (!type_is_assignable(left_type, right_type)) {
+                if (left_type->kind != TYPE_UNKNOWN && right_type->kind != TYPE_UNKNOWN) {
+                    type_destroy(left_type);
+                    type_destroy(right_type);
+                    return NULL;
+                }
+            }
+            result_type = type_copy(left_type);
             break;
 
         default:
@@ -2226,7 +2218,6 @@ static Type* check_call_expression(TypeCheckContext* ctx, ASTNode* expr) {
             if (entry && entry->type == SYMBOL_FUNCTION) {
                 
                 Type* return_type = type_create_basic(TYPE_INT32);
-                Type** param_types = NULL;
                 int param_count = 0;
                 
                 if (entry->ir_function) {
@@ -2699,10 +2690,7 @@ Type* type_check_expression(TypeCheckContext* context, ASTNode* expression) {
             return check_linq_query(context, expression);
 
         default:
-            {
-                char error_msg[256];
-                return NULL;
-            }
+            return NULL;
     }
 }
 
@@ -2711,7 +2699,7 @@ void type_check_init_builtin_types(TypeCheckContext* context) {
 
     for (int i = 0; BUILTIN_TYPES[i].name; i++) {
         TypeCheckSymbol symbol = {
-            BUILTIN_TYPES[i].name,
+            (char*)BUILTIN_TYPES[i].name,
             type_create_basic(BUILTIN_TYPES[i].kind),
             1, 0, 0
         };
@@ -2738,7 +2726,7 @@ void type_check_init_builtin_functions(TypeCheckContext* context) {
         Type* ret_type = type_create_basic(ret_kind);
         Type* func_type = type_create_function(ret_type, params, param_count);
 
-        TypeCheckSymbol symbol = {name, func_type, 1, 0, 0};
+        TypeCheckSymbol symbol = {(char*)name, func_type, 1, 0, 0};
         type_check_symbol_table_add(context->current_scope, symbol);
 
         type_destroy(ret_type);
@@ -3363,7 +3351,10 @@ static int check_variable_declaration(TypeCheckContext* context, ASTNode* statem
 
     KrtTokenType declared_token = statement->data.variable_decl.type;
     Type* declared_type = NULL;
-    if (declared_token != TOKEN_UNKNOWN) {
+    if (declared_token == TOKEN_IDENTIFIER && statement->data.variable_decl.template_instantiation_type) {
+        declared_type = type_from_string(context, statement->data.variable_decl.template_instantiation_type);
+    }
+    if (!declared_type && declared_token != TOKEN_UNKNOWN) {
         declared_type = type_create_from_token(declared_token);
     }
 

@@ -1,0 +1,30 @@
+namespace System
+
+public class Object
+{
+    public function Object()
+    {
+    }
+
+    public virtual function Equals(obj: Object): bool
+    {
+        return this == obj
+    }
+
+    public virtual function GetHashCode(): int32
+    {
+        var ptr = int64(this)
+        var shifted = ptr >> 32
+        return int32(ptr ^ shifted)
+    }
+
+    public virtual function ToString(): string
+    {
+        return "System.Object"
+    }
+
+    public function GetType(): Type
+    {
+        return null
+    }
+}

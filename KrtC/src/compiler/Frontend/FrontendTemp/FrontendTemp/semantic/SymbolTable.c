@@ -49,6 +49,8 @@ SymbolTable* symbol_table_create(void) {
         return NULL;
     }
 
+    table->parent_table = NULL;
+
     return table;
 }
 
@@ -297,14 +299,12 @@ bool symbol_table_check_entry_point_conflict(SymbolTable* table) {
     if (!table) return false;
 
     int entry_count = 0;
-    SymbolEntry* entry_point = NULL;
 
     for (int i = 0; i < table->hash_size; i++) {
         SymbolEntry* sym = table->hash_table[i];
         while (sym) {
             if (sym->is_entry_point) {
                 entry_count++;
-                entry_point = sym;
             }
             sym = sym->next;
         }

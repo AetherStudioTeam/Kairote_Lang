@@ -437,12 +437,13 @@ int KrtProjCreateTemplate(KrtProject* project, const char* output_dir) {
         KrtWriteFileIfPossible(file_path, tpl->content);
     }
 
-    char exe_dir[KRT_MAX_PATH];
+    char exe_dir[KRT_MAX_PATH - 32];
     char stdlib_src[KRT_MAX_PATH];
     char stdlib_dst[KRT_MAX_PATH];
 
 #ifdef _WIN32
     GetModuleFileNameA(NULL, exe_dir, sizeof(exe_dir));
+    exe_dir[sizeof(exe_dir) - 1] = '\0';
     char* last_sep = strrchr(exe_dir, '\\');
     if (last_sep) {
         *last_sep = '\0';
@@ -463,7 +464,7 @@ int KrtProjCreateTemplate(KrtProject* project, const char* output_dir) {
     snprintf(stdlib_src, sizeof(stdlib_src), "%s%c..%cstdlib", exe_dir, KrtPathSeparator(), KrtPathSeparator());
     struct stat stdlib_stat;
     if (stat(stdlib_src, &stdlib_stat) != 0 || !(stdlib_stat.st_mode & S_IFDIR)) {
-        
+
         snprintf(stdlib_src, sizeof(stdlib_src), "%s%cstdlib", exe_dir, KrtPathSeparator());
     }
 

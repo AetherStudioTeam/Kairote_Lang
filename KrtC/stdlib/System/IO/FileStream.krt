@@ -1,0 +1,542 @@
+namespace System.IO
+
+public class FileStream : Stream
+{
+    private var handle: int64
+    private var fileMode: FileMode
+    private var fileAccess: FileAccess
+    private var fileShare: FileShare
+    private var isAsync: bool
+    private var buffer: uint8[]
+    private var bufferSize: int32
+    private var bufferPos: int32
+    private var bufferCount: int32
+    private var filePos: int64
+    private var fileLength: int64
+    private var bufferDirty: bool
+    private var canRead: bool
+    private var canWrite: bool
+    private var canSeek: bool
+    private var isOpen: bool
+
+    public function FileStream(path: string, mode: FileMode)
+    {
+        this.FileStream(path, mode, FileAccess.ReadWrite, FileShare.Read, 4096, false)
+    }
+
+    public function FileStream(path: string, mode: FileMode, access: FileAccess)
+    {
+        this.FileStream(path, mode, access, FileShare.Read, 4096, false)
+    }
+
+    public function FileStream(path: string, mode: FileMode, access: FileAccess, share: FileShare)
+    {
+        this.FileStream(path, mode, access, share, 4096, false)
+    }
+
+    public function FileStream(path: string, mode: FileMode, access: FileAccess, share: FileShare, bufferSize: int32)
+    {
+        this.FileStream(path, mode, access, share, bufferSize, false)
+    }
+
+    public function FileStream(path: string, mode: FileMode, access: FileAccess, share: FileShare, bufferSize: int32, useAsync: bool)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        if bufferSize <= 0
+        {
+            throw new ArgumentOutOfRangeException("bufferSize")
+        }
+        this.fileMode = mode
+        this.fileAccess = access
+        this.fileShare = share
+        this.isAsync = useAsync
+        this.bufferSize = bufferSize
+        this.buffer = new uint8[bufferSize]
+        this.bufferPos = 0
+        this.bufferCount = 0
+        this.filePos = 0
+        this.bufferDirty = false
+        this.canRead = (access & FileAccess.Read) == FileAccess.Read
+        this.canWrite = (access & FileAccess.Write) == FileAccess.Write
+        this.canSeek = true
+        this.isOpen = true
+
+        this.handle = unsafe_file_open(path, int32(mode), int32(access), int32(share))
+        if this.handle < 0
+        {
+            throw new FileNotFoundException("Could not open file", path)
+        }
+
+        this.fileLength = unsafe_file_get_size(this.handle)
+
+        if mode == FileMode.Append
+        {
+            this.filePos = this.fileLength
+        }
+        else if mode == FileMode.Create
+        {
+            this.SetLength(0)
+        }
+        else if mode == FileMode.CreateNew
+        {
+            if this.fileLength > 0
+            {
+                unsafe_file_close(this.handle)
+                throw new IOException("File already exists")
+            }
+        }
+        else if mode == FileMode.Truncate
+        {
+            this.SetLength(0)
+        }
+    }
+
+    public function get_CanRead(): bool
+    {
+        return this.canRead && this.isOpen
+    }
+
+    public function get_CanWrite(): bool
+    {
+        return this.canWrite && this.isOpen
+    }
+
+    public function get_CanSeek(): bool
+    {
+        return this.canSeek && this.isOpen
+    }
+
+    public function get_Length(): int64
+    {
+        this.EnsureOpen()
+        if this.bufferDirty
+        {
+            return this.fileLength
+        }
+        return this.fileLength
+    }
+
+    public function get_Position(): int64
+    {
+        this.EnsureOpen()
+        return this.filePos - int64(this.bufferCount) + int64(this.bufferPos)
+    }
+
+    public function set_Position(value: int64)
+    {
+        this.EnsureOpen()
+        if value < 0
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        this.Seek(value, SeekOrigin.Begin)
+    }
+
+    public function get_IsAsync(): bool
+    {
+        return this.isAsync
+    }
+
+    public function get_Name(): string
+    {
+        return ""
+    }
+
+    public function get_SafeFileHandle(): int64
+    {
+        return this.handle
+    }
+
+    public function Flush()
+    {
+        this.EnsureOpen()
+        if this.bufferDirty
+        {
+            this.FlushBuffer()
+        }
+        unsafe_file_flush(this.handle)
+    }
+
+    public function Flush(flushToDisk: bool)
+    {
+        this.Flush()
+        if flushToDisk
+        {
+            unsafe_file_flush_to_disk(this.handle)
+        }
+    }
+
+    public function Lock(position: int64, length: int64)
+    {
+        this.EnsureOpen()
+        unsafe_file_lock(this.handle, position, length)
+    }
+
+    public function Unlock(position: int64, length: int64)
+    {
+        this.EnsureOpen()
+        unsafe_file_unlock(this.handle, position, length)
+    }
+
+    public function Read(buffer: uint8[], offset: int32, count: int32): int32
+    {
+        this.EnsureOpen()
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if offset < 0
+        {
+            throw new ArgumentOutOfRangeException("offset")
+        }
+        if count < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if buffer.Length - offset < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        if !this.canRead
+        {
+            throw new NotSupportedException("Stream does not support reading")
+        }
+        if count == 0
+        {
+            return 0
+        }
+
+        var totalRead = 0
+        var bytesFromBuffer = 0
+
+        if this.bufferCount > 0
+        {
+            bytesFromBuffer = this.bufferCount - this.bufferPos
+            if bytesFromBuffer > count
+            {
+                bytesFromBuffer = count
+            }
+            for var i = 0; i < bytesFromBuffer; i = i + 1
+            {
+                buffer[offset + i] = this.buffer[this.bufferPos + i]
+            }
+            this.bufferPos = this.bufferPos + bytesFromBuffer
+            totalRead = totalRead + bytesFromBuffer
+            count = count - bytesFromBuffer
+            offset = offset + bytesFromBuffer
+        }
+
+        if count == 0
+        {
+            return totalRead
+        }
+
+        if count >= this.bufferSize
+        {
+            if this.bufferDirty
+            {
+                this.FlushBuffer()
+            }
+            var bytesRead = unsafe_file_read(this.handle, buffer, offset, count)
+            this.filePos = this.filePos + int64(bytesRead)
+            totalRead = totalRead + bytesRead
+        }
+        else
+        {
+            if this.bufferDirty
+            {
+                this.FlushBuffer()
+            }
+            this.RefillBuffer()
+            bytesFromBuffer = this.bufferCount
+            if bytesFromBuffer > count
+            {
+                bytesFromBuffer = count
+            }
+            for var i = 0; i < bytesFromBuffer; i = i + 1
+            {
+                buffer[offset + i] = this.buffer[i]
+            }
+            this.bufferPos = bytesFromBuffer
+            totalRead = totalRead + bytesFromBuffer
+        }
+
+        return totalRead
+    }
+
+    public function Write(buffer: uint8[], offset: int32, count: int32)
+    {
+        this.EnsureOpen()
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if offset < 0
+        {
+            throw new ArgumentOutOfRangeException("offset")
+        }
+        if count < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if buffer.Length - offset < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        if !this.canWrite
+        {
+            throw new NotSupportedException("Stream does not support writing")
+        }
+        if count == 0
+        {
+            return
+        }
+
+        if this.bufferCount > 0 && this.bufferPos != this.bufferCount
+        {
+            var bytesToBuffer = this.bufferSize - this.bufferPos
+            if bytesToBuffer > count
+            {
+                bytesToBuffer = count
+            }
+            for var i = 0; i < bytesToBuffer; i = i + 1
+            {
+                this.buffer[this.bufferPos + i] = buffer[offset + i]
+            }
+            this.bufferPos = this.bufferPos + bytesToBuffer
+            this.bufferDirty = true
+            count = count - bytesToBuffer
+            offset = offset + bytesToBuffer
+        }
+
+        if count == 0
+        {
+            return
+        }
+
+        if this.bufferDirty
+        {
+            this.FlushBuffer()
+        }
+
+        if count >= this.bufferSize
+        {
+            unsafe_file_write(this.handle, buffer, offset, count)
+            this.filePos = this.filePos + int64(count)
+            if this.filePos > this.fileLength
+            {
+                this.fileLength = this.filePos
+            }
+        }
+        else
+        {
+            for var i = 0; i < count; i = i + 1
+            {
+                this.buffer[i] = buffer[offset + i]
+            }
+            this.bufferPos = count
+            this.bufferCount = count
+            this.bufferDirty = true
+        }
+    }
+
+    public function Seek(offset: int64, origin: SeekOrigin): int64
+    {
+        this.EnsureOpen()
+        if !this.canSeek
+        {
+            throw new NotSupportedException("Stream does not support seeking")
+        }
+
+        var newPos = int64(0)
+        if origin == SeekOrigin.Begin
+        {
+            newPos = offset
+        }
+        else if origin == SeekOrigin.Current
+        {
+            newPos = this.Position + offset
+        }
+        else if origin == SeekOrigin.End
+        {
+            newPos = this.fileLength + offset
+        }
+
+        if newPos < 0
+        {
+            throw new IOException("Seek before beginning of file")
+        }
+
+        if this.bufferDirty
+        {
+            this.FlushBuffer()
+        }
+        else if this.bufferCount > 0
+        {
+            var bufferStartPos = this.filePos - int64(this.bufferCount)
+            var bufferEndPos = this.filePos
+            if newPos >= bufferStartPos && newPos < bufferEndPos
+            {
+                this.bufferPos = int32(newPos - bufferStartPos)
+                return newPos
+            }
+        }
+
+        this.bufferCount = 0
+        this.bufferPos = 0
+        this.filePos = unsafe_file_seek(this.handle, newPos, 0)
+        return this.filePos
+    }
+
+    public function SetLength(value: int64)
+    {
+        this.EnsureOpen()
+        if value < 0
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        if !this.canWrite
+        {
+            throw new NotSupportedException("Stream does not support writing")
+        }
+        if this.bufferDirty
+        {
+            this.FlushBuffer()
+        }
+        unsafe_file_set_length(this.handle, value)
+        this.fileLength = value
+        if this.filePos > value
+        {
+            this.filePos = value
+            unsafe_file_seek(this.handle, value, 0)
+        }
+    }
+
+    public function ReadByte(): int32
+    {
+        this.EnsureOpen()
+        if this.bufferPos < this.bufferCount
+        {
+            var b = this.buffer[this.bufferPos]
+            this.bufferPos = this.bufferPos + 1
+            return int32(b)
+        }
+        return base.ReadByte()
+    }
+
+    public function WriteByte(value: uint8)
+    {
+        this.EnsureOpen()
+        if this.bufferPos < this.bufferSize && this.bufferDirty
+        {
+            this.buffer[this.bufferPos] = value
+            this.bufferPos = this.bufferPos + 1
+            if this.bufferPos > this.bufferCount
+            {
+                this.bufferCount = this.bufferPos
+            }
+        }
+        else
+        {
+            base.WriteByte(value)
+        }
+    }
+
+    public function Dispose()
+    {
+        if this.isOpen
+        {
+            this.Flush()
+            unsafe_file_close(this.handle)
+            this.isOpen = false
+            this.handle = -1
+        }
+    }
+
+    private function EnsureOpen()
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("FileStream")
+        }
+    }
+
+    private function FlushBuffer()
+    {
+        if this.bufferDirty && this.bufferCount > 0
+        {
+            unsafe_file_seek(this.handle, this.filePos - int64(this.bufferCount), 0)
+            unsafe_file_write(this.handle, this.buffer, 0, this.bufferCount)
+            this.filePos = this.filePos - int64(this.bufferCount) + int64(this.bufferCount)
+            if this.filePos > this.fileLength
+            {
+                this.fileLength = this.filePos
+            }
+        }
+        this.bufferDirty = false
+        this.bufferCount = 0
+        this.bufferPos = 0
+    }
+
+    private function RefillBuffer()
+    {
+        this.bufferCount = unsafe_file_read(this.handle, this.buffer, 0, this.bufferSize)
+        this.bufferPos = 0
+        this.filePos = this.filePos + int64(this.bufferCount)
+    }
+}
+
+public enum FileMode
+{
+    CreateNew = 1
+    Create = 2
+    Open = 3
+    OpenOrCreate = 4
+    Truncate = 5
+    Append = 6
+}
+
+public enum FileAccess
+{
+    Read = 1
+    Write = 2
+    ReadWrite = 3
+}
+
+public enum FileShare
+{
+    None = 0
+    Read = 1
+    Write = 2
+    ReadWrite = 3
+    Delete = 4
+    Inheritable = 16
+}
+
+public class ObjectDisposedException : InvalidOperationException
+{
+    private var objectName: string
+
+    public function ObjectDisposedException(): base()
+    {
+    }
+
+    public function ObjectDisposedException(objectName: string)
+    {
+        this.objectName = objectName
+        this.message = "Cannot access a disposed object."
+    }
+
+    public function ObjectDisposedException(objectName: string, message: string): base(message)
+    {
+        this.objectName = objectName
+    }
+
+    public function get_ObjectName(): string
+    {
+        return this.objectName
+    }
+}

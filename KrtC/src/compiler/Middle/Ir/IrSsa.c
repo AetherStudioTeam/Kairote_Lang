@@ -201,7 +201,7 @@ static void add_var_name(VarNameList* list, const char* name) {
     list->names[list->count++] = KRT_STRDUP(name);
 }
 
-char** KrtIrSsaCollectVars(KrtIRMemoryArena* arena, KrtIRFunction* func, int* count) {
+char** KrtIrSsaCollectVars(KrtIRMemoryArena* arena __attribute__((unused)), KrtIRFunction* func, int* count) {
     if (!func || !count) return NULL;
     
     VarNameList list = {0};

@@ -17,7 +17,7 @@ typedef enum {
     KRT_TARGET_EXE_PLATFORM     
 } KrtTargetPlatform;
 
-#include <bytecode.h>
+#include "../../../Shared/Bytecode.h"
 
 typedef struct {
     FILE* output_file;

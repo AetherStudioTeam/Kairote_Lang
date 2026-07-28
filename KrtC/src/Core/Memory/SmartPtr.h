@@ -1,7 +1,7 @@
 #ifndef KRT_SMART_PTR_H
 #define KRT_SMART_PTR_H
 
-#include "../Utils/logger.h"
+#include "../Utils/Logger.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>

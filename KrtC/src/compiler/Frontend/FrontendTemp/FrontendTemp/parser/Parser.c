@@ -4,10 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 extern int strcmp(const char* s1, const char* s2);
 #include "../../../../../Accelerator.h"
 #include "../../../../../Core/Utils/KrtCommon.h"
@@ -65,6 +61,11 @@ extern int strcmp(const char* s1, const char* s2);
 #define PARSER_CREATE_NODE(type, line, col) ast_create_node_arena(type, line, col, parser->arena)
 #define PARSER_STRDUP(s) arena_strdup(parser->arena, s)
 
+// Redefine ast_create_node to use parser's arena for consistent memory allocation
+// This ensures all AST nodes in Parser.c use arena allocation
+#undef ast_create_node
+#define ast_create_node(type, line, col) ast_create_node_arena(type, line, col, parser->arena)
+
 static char* arena_strdup(KrtArena* arena, const char* str) {
     if (!str) return NULL;
     size_t len = strlen(str) + 1;
@@ -85,25 +86,29 @@ static ASTNode* parser_parse_statement(Parser* parser);
 static ASTNode* parser_parse_block(Parser* parser);
 static ASTNode* parser_parse_new_expression(Parser* parser);
 static ASTNode* parser_parse_postfix_expression(Parser* parser);
+static ASTNode* parser_parse_primary_debug(Parser* parser);
 static ASTNode* parser_parse_constructor_declaration(Parser* parser);
 static ASTNode* parser_parse_destructor_declaration(Parser* parser);
 static ASTNode* parser_parse_static_member_declaration(Parser* parser);
-static ASTNode* parser_parse_static_variable_declaration(Parser* parser);
-static ASTNode* parser_parse_static_function_declaration(Parser* parser);
+
 static ASTNode* parser_parse_function_declaration(Parser* parser);
 static ASTNode* parser_parse_ternary_operation(Parser* parser);
 static ASTNode* parser_parse_type_declaration(Parser* parser);
 static ASTNode* parser_parse_typed_function_declaration(Parser* parser, KrtTokenType return_type, char* function_name, int is_static, int line, int col);
 static int parser_is_type_keyword(KrtTokenType type);
-static int parser_parse_parameter_list(Parser* parser, char*** parameters, KrtTokenType** parameter_types, int* parameter_count);
-static void parser_free_parameter_list(char** parameters, KrtTokenType* parameter_types, int parameter_count);
-static ASTNode* parser_create_function_node(Parser* parser, int is_static, char* name, char** parameters, KrtTokenType* parameter_types, int parameter_count, ASTNode* body, KrtTokenType return_type, int line, int col);
+static int parser_parse_parameter_list(Parser* parser, char*** parameters, KrtTokenType** parameter_types, int** parameter_is_params, int** parameter_is_array, ASTNode*** parameter_default_values, int* parameter_count);
+static void parser_free_parameter_list(char** parameters, KrtTokenType* parameter_types, int* parameter_is_params, int* parameter_is_array, ASTNode** parameter_default_values, int parameter_count);
+static ASTNode* parser_create_function_node(Parser* parser, int is_static, int is_async, char* name, char** parameters, KrtTokenType* parameter_types, int* parameter_is_params, int* parameter_is_array, ASTNode** parameter_default_values, int parameter_count, ASTNode* body, KrtTokenType return_type, int line, int col);
 static ASTNode* parser_parse_property_declaration(Parser* parser, KrtTokenType type, char* name, ASTNode** attributes, int attribute_count);
 static ASTNode* parser_parse_lambda_expression(Parser* parser, char** parameters, int parameter_count);
 static ASTNode* parser_parse_linq_query(Parser* parser);
-static ASTNode* parser_parse_attribute(Parser* parser);
-static ASTNode* parser_parse_attributes(Parser* parser);
+static ASTNode* parser_parse_match_expression(Parser* parser);
+static ASTNode* parser_parse_pattern(Parser* parser);
 static int parser_parse_lambda_parameters(Parser* parser, char*** parameters, int* parameter_count);
+static ASTNode* parser_parse_fixed_statement(Parser* parser);
+static ASTNode* parser_parse_stackalloc_expression(Parser* parser);
+static ASTNode* parser_parse_await_expression(Parser* parser);
+static ASTNode* parser_parse_generic_constraints(Parser* parser);
 static void parser_add_declared_function(Parser* parser, const char* func_name) {
     if (!parser || !func_name) {
         return;
@@ -123,18 +128,6 @@ static void parser_add_declared_function(Parser* parser, const char* func_name) 
         parser->declared_function_capacity = new_capacity;
     }
     parser->declared_functions[parser->declared_function_count++] = KRT_STRDUP(func_name);
-}
-
-static int parser_is_declared_function(Parser* parser, const char* identifier) {
-    if (!parser || !identifier) {
-        return 0;
-    }
-    for (int i = 0; i < parser->declared_function_count; i++) {
-        if (strcmp(parser->declared_functions[i], identifier) == 0) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 Parser* parser_create(Lexer* lexer) {
@@ -210,6 +203,9 @@ static int parser_is_type_keyword(KrtTokenType type) {
 
 static void parser_free_parameter_list(char** parameters,
                                        KrtTokenType* parameter_types,
+                                       int* parameter_is_params,
+                                       int* parameter_is_array,
+                                       ASTNode** parameter_default_values,
                                        int parameter_count) {
     if (parameters) {
         for (int i = 0; i < parameter_count; i++) {
@@ -222,65 +218,190 @@ static void parser_free_parameter_list(char** parameters,
     if (parameter_types) {
         KRT_FREE(parameter_types);
     }
+    if (parameter_is_params) {
+        KRT_FREE(parameter_is_params);
+    }
+    if (parameter_is_array) {
+        KRT_FREE(parameter_is_array);
+    }
+    if (parameter_default_values) {
+        for (int i = 0; i < parameter_count; i++) {
+            if (parameter_default_values[i]) {
+                ast_destroy_node(parameter_default_values[i]);
+            }
+        }
+        KRT_FREE(parameter_default_values);
+    }
 }
 
-static int parser_parse_parameter_list(Parser* parser, char*** parameters, KrtTokenType** parameter_types, int* parameter_count) {
-    if (!parameters || !parameter_types || !parameter_count) {
+static int parser_parse_parameter_list(Parser* parser, char*** parameters, KrtTokenType** parameter_types, int** parameter_is_params, int** parameter_is_array, ASTNode*** parameter_default_values, int* parameter_count) {
+    if (!parameters || !parameter_types || !parameter_is_params || !parameter_is_array || !parameter_default_values || !parameter_count) {
         return 0;
     }
     *parameters = NULL;
     *parameter_types = NULL;
+    *parameter_is_params = NULL;
+    *parameter_is_array = NULL;
+    *parameter_default_values = NULL;
     *parameter_count = 0;
     if (parser->current_token.type == TOKEN_RIGHT_PAREN) {
         return 1;
     }
     while (1) {
+        int is_params = 0;
+        if (parser->current_token.type == TOKEN_PARAMS) {
+            is_params = 1;
+            parser_advance(parser);
+        }
         KrtTokenType param_type = TOKEN_UNKNOWN;
+        int param_is_nullable = 0;
+        int param_is_array = 0;
         if (parser_is_type_keyword(parser->current_token.type)) {
             param_type = parser->current_token.type;
             parser_advance(parser);
+            if (parser->current_token.type == TOKEN_LEFT_BRACKET) {
+                parser_advance(parser);
+                if (parser->current_token.type != TOKEN_RIGHT_BRACKET) {
+                    return 0;
+                }
+                parser_advance(parser);
+                param_is_array = 1;
+            }
+            if (parser->current_token.type == TOKEN_QUESTION) {
+                param_is_nullable = 1;
+                parser_advance(parser);
+            }
+            (void)param_is_nullable;
         }
-        if (parser->current_token.type != TOKEN_IDENTIFIER) {
-            parser_free_parameter_list(*parameters, *parameter_types, *parameter_count);
+    if (parser->current_token.type != TOKEN_IDENTIFIER) {
+            parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
             *parameters = NULL;
             *parameter_types = NULL;
+            *parameter_is_params = NULL;
+            *parameter_is_array = NULL;
+            *parameter_default_values = NULL;
             *parameter_count = 0;
             return 0;
         }
         char* param_name = KRT_STRDUP(parser->current_token.value);
         if (!param_name) {
-            parser_free_parameter_list(*parameters, *parameter_types, *parameter_count);
+            parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
             *parameters = NULL;
             *parameter_types = NULL;
+            *parameter_is_params = NULL;
+            *parameter_is_array = NULL;
+            *parameter_default_values = NULL;
             *parameter_count = 0;
             return 0;
         }
+
+        ASTNode* default_value = NULL;
+        parser_advance(parser);
+
+        if (parser->current_token.type == TOKEN_COLON) {
+            parser_advance(parser);
+            if (parser_is_type_keyword(parser->current_token.type)) {
+                param_type = parser->current_token.type;
+                parser_advance(parser);
+            } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
+                param_type = TOKEN_UNKNOWN;
+                parser_advance(parser);
+            } else {
+                KRT_FREE(param_name);
+                parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
+                *parameters = NULL;
+                *parameter_types = NULL;
+                *parameter_is_params = NULL;
+                *parameter_is_array = NULL;
+                *parameter_default_values = NULL;
+                *parameter_count = 0;
+                return 0;
+            }
+            if (parser->current_token.type == TOKEN_LEFT_BRACKET) {
+                parser_advance(parser);
+                if (parser->current_token.type != TOKEN_RIGHT_BRACKET) {
+                    KRT_FREE(param_name);
+                    parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
+                    *parameters = NULL;
+                    *parameter_types = NULL;
+                    *parameter_is_params = NULL;
+                    *parameter_is_array = NULL;
+                    *parameter_default_values = NULL;
+                    *parameter_count = 0;
+                    return 0;
+                }
+                parser_advance(parser);
+                param_is_array = 1;
+            }
+            if (parser->current_token.type == TOKEN_QUESTION) {
+                parser_advance(parser);
+            }
+        }
+
+        if (parser->current_token.type == TOKEN_ASSIGN) {
+            parser_advance(parser);
+            default_value = parser_parse_expression(parser);
+            if (!default_value) {
+                KRT_FREE(param_name);
+                parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
+                *parameters = NULL;
+                *parameter_types = NULL;
+                *parameter_is_params = NULL;
+                *parameter_is_array = NULL;
+                *parameter_default_values = NULL;
+                *parameter_count = 0;
+                return 0;
+            }
+        }
+
         char** new_parameters = (char**)KRT_REALLOC(*parameters, (*parameter_count + 1) * sizeof(char*));
         KrtTokenType* new_param_types = (KrtTokenType*)KRT_REALLOC(*parameter_types, (*parameter_count + 1) * sizeof(KrtTokenType));
-        if (!new_parameters || !new_param_types) {
+        int* new_is_params = (int*)KRT_REALLOC(*parameter_is_params, (*parameter_count + 1) * sizeof(int));
+        int* new_is_array = (int*)KRT_REALLOC(*parameter_is_array, (*parameter_count + 1) * sizeof(int));
+        ASTNode** new_default_values = (ASTNode**)KRT_REALLOC(*parameter_default_values, (*parameter_count + 1) * sizeof(ASTNode*));
+        if (!new_parameters || !new_param_types || !new_is_params || !new_is_array || !new_default_values) {
             KRT_FREE(param_name);
+            if (default_value) ast_destroy_node(default_value);
             if (new_parameters) {
                 *parameters = new_parameters;
             }
             if (new_param_types) {
                 *parameter_types = new_param_types;
             }
-            parser_free_parameter_list(*parameters, *parameter_types, *parameter_count);
+            if (new_is_params) {
+                *parameter_is_params = new_is_params;
+            }
+            if (new_is_array) {
+                *parameter_is_array = new_is_array;
+            }
+            if (new_default_values) {
+                *parameter_default_values = new_default_values;
+            }
+            parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
             *parameters = NULL;
             *parameter_types = NULL;
+            *parameter_is_params = NULL;
+            *parameter_is_array = NULL;
+            *parameter_default_values = NULL;
             *parameter_count = 0;
             return 0;
         }
         *parameters = new_parameters;
         *parameter_types = new_param_types;
+        *parameter_is_params = new_is_params;
+        *parameter_is_array = new_is_array;
+        *parameter_default_values = new_default_values;
         (*parameters)[*parameter_count] = param_name;
         (*parameter_types)[*parameter_count] = param_type;
+        (*parameter_is_params)[*parameter_count] = is_params;
+        (*parameter_is_array)[*parameter_count] = param_is_array;
+        (*parameter_default_values)[*parameter_count] = default_value;
         (*parameter_count)++;
-        parser_advance(parser);
+
         if (parser->current_token.type == TOKEN_COLON) {
             parser_advance(parser);
-            if (!parser_is_type_keyword(parser->current_token.type)) {
-                parser_free_parameter_list(*parameters, *parameter_types, *parameter_count);
+            if (!parser_is_type_keyword(parser->current_token.type) && parser->current_token.type != TOKEN_IDENTIFIER) {
+                parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
                 return 0;
             }
             (*parameter_types)[*parameter_count - 1] = parser->current_token.type;
@@ -290,7 +411,7 @@ static int parser_parse_parameter_list(Parser* parser, char*** parameters, KrtTo
             break;
         }
         if (parser->current_token.type != TOKEN_COMMA) {
-            parser_free_parameter_list(*parameters, *parameter_types, *parameter_count);
+            parser_free_parameter_list(*parameters, *parameter_types, *parameter_is_params, *parameter_is_array, *parameter_default_values, *parameter_count);
             return 0;
         }
         parser_advance(parser);
@@ -300,9 +421,13 @@ static int parser_parse_parameter_list(Parser* parser, char*** parameters, KrtTo
 
 static ASTNode* parser_create_function_node(Parser* parser,
                                             int is_static,
+                                            int is_async,
                                             char* name,
                                             char** parameters,
                                             KrtTokenType* parameter_types,
+                                            int* parameter_is_params,
+                                            int* parameter_is_array,
+                                            ASTNode** parameter_default_values,
                                             int parameter_count,
                                             ASTNode* body,
                                             KrtTokenType return_type,
@@ -317,6 +442,9 @@ static ASTNode* parser_create_function_node(Parser* parser,
         node->data.static_function_decl.name = name;
         node->data.static_function_decl.parameters = parameters;
         node->data.static_function_decl.parameter_types = parameter_types;
+        node->data.static_function_decl.parameter_is_params = parameter_is_params;
+        node->data.static_function_decl.parameter_is_array = parameter_is_array;
+        node->data.static_function_decl.parameter_default_values = parameter_default_values;
         node->data.static_function_decl.parameter_count = parameter_count;
         node->data.static_function_decl.body = body;
         node->data.static_function_decl.return_type = return_type;
@@ -324,9 +452,13 @@ static ASTNode* parser_create_function_node(Parser* parser,
         node->data.function_decl.name = name;
         node->data.function_decl.parameters = parameters;
         node->data.function_decl.parameter_types = parameter_types;
+        node->data.function_decl.parameter_is_params = parameter_is_params;
+        node->data.function_decl.parameter_is_array = parameter_is_array;
+        node->data.function_decl.parameter_default_values = parameter_default_values;
         node->data.function_decl.parameter_count = parameter_count;
         node->data.function_decl.body = body;
         node->data.function_decl.return_type = return_type;
+        node->data.function_decl.is_async = is_async;
     }
     parser_add_declared_function(parser, name);
     return node;
@@ -511,7 +643,7 @@ static ASTNode* parser_parse_print_like_statement(Parser* parser, bool has_newli
 
 static ASTNode* parser_parse_console_writeline(Parser* parser) {
     int line = parser->current_token.line;
-    int col = parser->current_token.column;
+    (void)line;
     parser_advance(parser); 
     if (parser->current_token.type != TOKEN_DOT) {
         return NULL;
@@ -643,24 +775,30 @@ static ASTNode* parser_parse_unsafe_call(Parser* parser) {
 static ASTNode* parser_parse_namespace_declaration(Parser* parser) {
     int line = parser->current_token.line;
     int col = parser->current_token.column;
+    printf("[DEBUG] parser_parse_namespace_declaration: starting, token=%d\n", parser->current_token.type);
     parser_advance(parser);
     if (parser->current_token.type != TOKEN_IDENTIFIER) {
+        printf("[DEBUG] parser_parse_namespace_declaration: expected IDENTIFIER, got %d\n", parser->current_token.type);
         return NULL;
     }
     char* name = KRT_STRDUP(parser->current_token.value);
+    printf("[DEBUG] parser_parse_namespace_declaration: name=%s\n", name);
     parser_advance(parser);
+    printf("[DEBUG] parser_parse_namespace_declaration: after name advance, token=%d\n", parser->current_token.type);
     if (parser->current_token.type == TOKEN_COLON) {
         KRT_FREE(name);
         return NULL;
     }
     ASTNode* body = parser_parse_block(parser);
+    printf("[DEBUG] parser_parse_namespace_declaration: body=%p, type=%d\n", (void*)body, body ? (int)body->type : -1);
     if (!body) {
         KRT_FREE(name);
         return NULL;
     }
-    ASTNode* node = ast_create_node(AST_NAMESPACE_DECLARATION, line, col);
+    ASTNode* node = PARSER_CREATE_NODE(AST_NAMESPACE_DECLARATION, line, col);
     node->data.namespace_decl.name = name;
     node->data.namespace_decl.body = body;
+    printf("[DEBUG] parser_parse_namespace_declaration: created node=%p, body=%p\n", (void*)node, (void*)body);
     return node;
 }
 
@@ -669,6 +807,10 @@ static ASTNode* parser_parse_using_directive(Parser* parser) {
     int col = parser->current_token.column;
     
     parser_advance(parser);
+    
+    if (parser->current_token.type == TOKEN_LEFT_PAREN) {
+        return parser_parse_using_statement(parser);
+    }
     
     if (parser->current_token.type != TOKEN_IDENTIFIER) {
         return NULL;
@@ -783,19 +925,259 @@ static ASTNode* parser_parse_using_directive(Parser* parser) {
     return node;
 }
 
-static ASTNode* parser_parse_class_declaration(Parser* parser) {
+static ASTNode* parser_parse_delegate_declaration(Parser* parser) {
     int line = parser->current_token.line;
     int col = parser->current_token.column;
     parser_advance(parser);
+
+    // Parse return type if present (e.g., "void" in "public delegate void Action()")
+    // Also handle "function" keyword (e.g., "public delegate function Action()")
+    KrtTokenType delegate_return_type = TOKEN_VOID;
+    if (parser_is_type_keyword(parser->current_token.type)) {
+        delegate_return_type = parser->current_token.type;
+        parser_advance(parser);
+    } else if (parser->current_token.type == TOKEN_FUNCTION) {
+        // "function" keyword is used instead of return type, skip it
+        parser_advance(parser);
+    }
+    (void)delegate_return_type;
+
     if (parser->current_token.type != TOKEN_IDENTIFIER) {
         return NULL;
     }
     char* name = KRT_STRDUP(parser->current_token.value);
     parser_advance(parser);
     
+    if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+        KRT_FREE(name);
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    char** parameters = NULL;
+    KrtTokenType* parameter_types = NULL;
+    int parameter_count = 0;
+    
+    if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+        int capacity = 4;
+        parameters = (char**)KRT_MALLOC(capacity * sizeof(char*));
+        parameter_types = (KrtTokenType*)KRT_MALLOC(capacity * sizeof(KrtTokenType));
+        
+        if (!parameters || !parameter_types) {
+            KRT_FREE(name);
+            KRT_FREE(parameters);
+            KRT_FREE(parameter_types);
+            return NULL;
+        }
+        
+        while (1) {
+            KrtTokenType param_type = TOKEN_VOID;
+            if (parser_is_type_keyword(parser->current_token.type)) {
+                param_type = parser->current_token.type;
+                parser_advance(parser);
+            } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
+                param_type = TOKEN_IDENTIFIER;
+                parser_advance(parser);
+            } else {
+                for (int i = 0; i < parameter_count; i++) {
+                    KRT_FREE(parameters[i]);
+                }
+                KRT_FREE(parameters);
+                KRT_FREE(parameter_types);
+                KRT_FREE(name);
+                return NULL;
+            }
+            
+            if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                for (int i = 0; i < parameter_count; i++) {
+                    KRT_FREE(parameters[i]);
+                }
+                KRT_FREE(parameters);
+                KRT_FREE(parameter_types);
+                KRT_FREE(name);
+                return NULL;
+            }
+            
+            if (parameter_count >= capacity) {
+                capacity *= 2;
+                char** new_params = (char**)KRT_REALLOC(parameters, capacity * sizeof(char*));
+                KrtTokenType* new_types = (KrtTokenType*)KRT_REALLOC(parameter_types, capacity * sizeof(KrtTokenType));
+                if (!new_params || !new_types) {
+                    for (int i = 0; i < parameter_count; i++) {
+                        KRT_FREE(parameters[i]);
+                    }
+                    KRT_FREE(parameters);
+                    KRT_FREE(parameter_types);
+                    KRT_FREE(name);
+                    return NULL;
+                }
+                parameters = new_params;
+                parameter_types = new_types;
+            }
+            
+            parameters[parameter_count] = KRT_STRDUP(parser->current_token.value);
+            parameter_types[parameter_count] = param_type;
+            parameter_count++;
+            parser_advance(parser);
+            
+            if (parser->current_token.type == TOKEN_COMMA) {
+                parser_advance(parser);
+            } else if (parser->current_token.type == TOKEN_RIGHT_PAREN) {
+                break;
+            } else {
+                for (int i = 0; i < parameter_count; i++) {
+                    KRT_FREE(parameters[i]);
+                }
+                KRT_FREE(parameters);
+                KRT_FREE(parameter_types);
+                KRT_FREE(name);
+                return NULL;
+            }
+        }
+    }
+    
+    if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+        for (int i = 0; i < parameter_count; i++) {
+            KRT_FREE(parameters[i]);
+        }
+        KRT_FREE(parameters);
+        KRT_FREE(parameter_types);
+        KRT_FREE(name);
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    KrtTokenType return_type = TOKEN_VOID;
+    if (parser->current_token.type == TOKEN_COLON) {
+        parser_advance(parser);
+        if (parser_is_type_keyword(parser->current_token.type)) {
+            return_type = parser->current_token.type;
+            parser_advance(parser);
+        } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
+            return_type = TOKEN_IDENTIFIER;
+            parser_advance(parser);
+        } else {
+            for (int i = 0; i < parameter_count; i++) {
+                KRT_FREE(parameters[i]);
+            }
+            KRT_FREE(parameters);
+            KRT_FREE(parameter_types);
+            KRT_FREE(name);
+            return NULL;
+        }
+    }
+    
+    if (parser->current_token.type == TOKEN_SEMICOLON) {
+        parser_advance(parser);
+    }
+    
+    ASTNode* node = ast_create_node(AST_DELEGATE_DECLARATION, line, col);
+    if (!node) {
+        for (int i = 0; i < parameter_count; i++) {
+            KRT_FREE(parameters[i]);
+        }
+        KRT_FREE(parameters);
+        KRT_FREE(parameter_types);
+        KRT_FREE(name);
+        return NULL;
+    }
+    
+    node->data.delegate_decl.name = name;
+    node->data.delegate_decl.parameters = parameters;
+    node->data.delegate_decl.parameter_types = parameter_types;
+    node->data.delegate_decl.parameter_count = parameter_count;
+    node->data.delegate_decl.return_type = return_type;
+    
+    return node;
+}
+
+static ASTNode* parser_parse_class_declaration(Parser* parser) {
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+    printf("[DEBUG] parser_parse_class_declaration: starting, token=%d\n", parser->current_token.type);
+    parser_advance(parser);
+    printf("[DEBUG] parser_parse_class_declaration: after advance, token=%d, value=%s\n", parser->current_token.type, parser->current_token.value ? parser->current_token.value : "null");
+    if (parser->current_token.type != TOKEN_IDENTIFIER) {
+        printf("[DEBUG] parser_parse_class_declaration: expected IDENTIFIER, got %d\n", parser->current_token.type);
+        return NULL;
+    }
+    char* name = KRT_STRDUP(parser->current_token.value);
+    parser_advance(parser);
+
     char* old_class = parser->current_class;
     parser->current_class = name;
-    
+
+    // Parse generic type parameters if present
+    ASTNode** generic_params = NULL;
+    int generic_param_count = 0;
+    if (parser->current_token.type == TOKEN_LESS) {
+        parser_advance(parser); // consume '<'
+
+        // Parse type parameters
+        int capacity = 4;
+        generic_params = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
+        if (!generic_params) {
+            KRT_FREE(name);
+            parser->current_class = old_class;
+            return NULL;
+        }
+
+        while (parser->current_token.type == TOKEN_IDENTIFIER) {
+            if (generic_param_count >= capacity) {
+                capacity *= 2;
+                ASTNode** new_params = (ASTNode**)KRT_REALLOC(generic_params, capacity * sizeof(ASTNode*));
+                if (!new_params) {
+                    for (int i = 0; i < generic_param_count; i++) {
+                        ast_destroy_node(generic_params[i]);
+                    }
+                    KRT_FREE(generic_params);
+                    KRT_FREE(name);
+                    parser->current_class = old_class;
+                    return NULL;
+                }
+                generic_params = new_params;
+            }
+
+            ASTNode* param = PARSER_CREATE_NODE(AST_TEMPLATE_PARAMETER, line, col);
+            if (!param) {
+                for (int i = 0; i < generic_param_count; i++) {
+                    ast_destroy_node(generic_params[i]);
+                }
+                KRT_FREE(generic_params);
+                KRT_FREE(name);
+                parser->current_class = old_class;
+                return NULL;
+            }
+            param->data.template_param.param_name = KRT_STRDUP(parser->current_token.value);
+            generic_params[generic_param_count++] = param;
+
+            parser_advance(parser);
+
+            if (parser->current_token.type == TOKEN_COMMA) {
+                parser_advance(parser);
+            } else {
+                break;
+            }
+        }
+
+        if (parser->current_token.type != TOKEN_GREATER) {
+            for (int i = 0; i < generic_param_count; i++) {
+                ast_destroy_node(generic_params[i]);
+            }
+            KRT_FREE(generic_params);
+            KRT_FREE(name);
+            parser->current_class = old_class;
+            return NULL;
+        }
+        parser_advance(parser); // consume '>'
+    }
+
+    // Parse generic constraints if present
+    ASTNode* constraints = NULL;
+    if (parser->current_token.type == TOKEN_WHERE) {
+        constraints = parser_parse_generic_constraints(parser);
+    }
+
     ASTNode* base_class = NULL;
     if (parser->current_token.type == TOKEN_COLON) {
         int bc_line = parser->current_token.line;
@@ -811,27 +1193,93 @@ static ASTNode* parser_parse_class_declaration(Parser* parser) {
         parser_advance(parser);
     }
     ASTNode* body = parser_parse_block(parser);
-    
+
     parser->current_class = old_class;
-    
+
     if (!body) {
+        printf("[DEBUG] parser_parse_class_declaration: body is NULL\n");
         KRT_FREE(name);
         if (base_class) {
             ast_destroy_node(base_class);
         }
+        for (int i = 0; i < generic_param_count; i++) {
+            ast_destroy_node(generic_params[i]);
+        }
+        KRT_FREE(generic_params);
         return NULL;
     }
-    ASTNode* node = ast_create_node(AST_CLASS_DECLARATION, line, col);
+    printf("[DEBUG] parser_parse_class_declaration: creating class node for %s\n", name);
+    ASTNode* node = PARSER_CREATE_NODE(AST_CLASS_DECLARATION, line, col);
     node->data.class_decl.name = name;
     node->data.class_decl.body = body;
     node->data.class_decl.base_class = base_class;
+    node->data.class_decl.template_params = (char**)generic_params;
+    node->data.class_decl.template_param_count = generic_param_count;
+    node->data.class_decl.constraints = (ASTNode**)constraints;
+    node->data.class_decl.constraint_count = constraints ? 1 : 0;
     return node;
+}
+
+static KrtTokenType parser_peek_after_closing_paren(Parser* parser) {
+    if (!parser || !parser->lexer) return TOKEN_EOF;
+    Lexer saved = *parser->lexer;
+    int depth = 0;
+    KrtTokenType result = TOKEN_EOF;
+    while (1) {
+        Token t = lexer_next_token(parser->lexer);
+        if (t.type == TOKEN_LEFT_PAREN) {
+            depth++;
+        } else if (t.type == TOKEN_RIGHT_PAREN) {
+            if (depth == 0) {
+                Token after = lexer_next_token(parser->lexer);
+                result = after.type;
+                break;
+            }
+            depth--;
+        } else if (t.type == TOKEN_EOF) {
+            break;
+        }
+    }
+    *parser->lexer = saved;
+    return result;
 }
 
 static ASTNode* parser_parse_primary(Parser* parser) {
     ASTNode* node = NULL;
     int line = parser->current_token.line;
     int col = parser->current_token.column;
+    if (parser_is_type_keyword(parser->current_token.type)) {
+        Token peek = lexer_peek_token(parser->lexer);
+        if (peek.type == TOKEN_LEFT_PAREN) {
+            // This is an explicit cast: Type(expression)
+            KrtTokenType target_type = parser->current_token.type;
+            token_free(&peek);
+            parser_advance(parser); // consume type
+            parser_advance(parser); // consume '('
+            
+            ASTNode* expr = parser_parse_expression(parser);
+            if (!expr) {
+                return NULL;
+            }
+            
+            if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                ast_destroy_node(expr);
+                return NULL;
+            }
+            parser_advance(parser); // consume ')'
+            
+            node = ast_create_node(AST_CAST_EXPRESSION, line, col);
+            if (!node) {
+                ast_destroy_node(expr);
+                return NULL;
+            }
+            node->data.cast_expr.target_type = target_type;
+            node->data.cast_expr.expression = expr;
+            return node;
+        }
+        token_free(&peek);
+    }
+
     switch (parser->current_token.type) {
         case TOKEN_NUMBER:
             node = ast_create_node(AST_NUMBER, line, col);
@@ -843,6 +1291,117 @@ static ASTNode* parser_parse_primary(Parser* parser) {
             node->data.string_value = KRT_STRDUP(parser->current_token.value);
             parser_advance(parser);
             break;
+        case TOKEN_DOLLAR: {
+            // Interpolated string: $"Hello {name}!"
+            parser_advance(parser); // consume $
+            
+            if (parser->current_token.type != TOKEN_STRING) {
+                return NULL;
+            }
+            
+            // Parse the string literal and extract interpolated parts
+            char* raw_string = parser->current_token.value;
+            parser_advance(parser); // consume string
+            
+            // Simple implementation: parse the string for {expression} patterns
+            node = ast_create_node(AST_INTERPOLATED_STRING, line, col);
+            if (!node) {
+                return NULL;
+            }
+            
+            // Allocate arrays for parts and expressions
+            int capacity = 8;
+            char** parts = (char**)KRT_MALLOC(capacity * sizeof(char*));
+            ASTNode** expressions = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
+            if (!parts || !expressions) {
+                if (parts) KRT_FREE(parts);
+                if (expressions) KRT_FREE(expressions);
+                ast_destroy_node(node);
+                return NULL;
+            }
+            
+            int part_count = 0;
+            int expr_count = 0;
+            
+            // Parse the raw string for interpolation
+            // Format: "text {expr} more text {expr2} end"
+            char* str = KRT_STRDUP(raw_string);
+            if (!str) {
+                KRT_FREE(parts);
+                KRT_FREE(expressions);
+                ast_destroy_node(node);
+                return NULL;
+            }
+            
+            char* p = str;
+            char* current_part = (char*)KRT_MALLOC(strlen(str) + 1);
+            if (!current_part) {
+                KRT_FREE(str);
+                KRT_FREE(parts);
+                KRT_FREE(expressions);
+                ast_destroy_node(node);
+                return NULL;
+            }
+            int part_idx = 0;
+            
+            while (*p) {
+                if (*p == '{' && *(p+1) != '{') {
+                    // End current part
+                    current_part[part_idx] = '\0';
+                    if (part_idx > 0 || part_count == 0) {
+                        parts[part_count++] = KRT_STRDUP(current_part);
+                    }
+                    part_idx = 0;
+                    p++;
+                    
+                    // Parse expression until }
+                    char expr_buf[256];
+                    int expr_idx = 0;
+                    int brace_depth = 1;
+                    while (*p && brace_depth > 0) {
+                        if (*p == '{') brace_depth++;
+                        else if (*p == '}') brace_depth--;
+                        
+                        if (brace_depth > 0) {
+                            expr_buf[expr_idx++] = *p;
+                        }
+                        p++;
+                    }
+                    expr_buf[expr_idx] = '\0';
+                    
+                    // Create a simple identifier node for the expression
+                    // In a full implementation, we'd parse the expression properly
+                    ASTNode* expr_node = ast_create_node(AST_IDENTIFIER, line, col);
+                    if (expr_node) {
+                        expr_node->data.identifier_name = KRT_STRDUP(expr_buf);
+                        expressions[expr_count++] = expr_node;
+                    }
+                } else {
+                    // Skip escaped braces
+                    if (*p == '{' && *(p+1) == '{') p++;
+                    else if (*p == '}' && *(p+1) == '}') p++;
+                    
+                    current_part[part_idx++] = *p;
+                    p++;
+                }
+            }
+            
+            // Add final part
+            current_part[part_idx] = '\0';
+            if (part_idx > 0) {
+                parts[part_count++] = KRT_STRDUP(current_part);
+            }
+            
+            KRT_FREE(current_part);
+            KRT_FREE(str);
+            
+            node->data.interpolated_string.string_parts = parts;
+            node->data.interpolated_string.part_count = part_count;
+            node->data.interpolated_string.expressions = expressions;
+            node->data.interpolated_string.expression_count = expr_count;
+            
+            return node;
+        }
         case TOKEN_TRUE:
             node = ast_create_node(AST_BOOLEAN, line, col);
             node->data.boolean_value = 1;
@@ -853,6 +1412,49 @@ static ASTNode* parser_parse_primary(Parser* parser) {
             node->data.boolean_value = 0;
             parser_advance(parser);
             break;
+        case TOKEN_NULL:
+            node = ast_create_node(AST_NULL, line, col);
+            parser_advance(parser);
+            break;
+        case TOKEN_SIZEOF: {
+            parser_advance(parser); // consume sizeof
+            
+            if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+                return NULL;
+            }
+            parser_advance(parser); // consume '('
+            
+            KrtTokenType type_token = TOKEN_EOF;
+            char* type_name = NULL;
+            
+            if (parser_is_type_keyword(parser->current_token.type)) {
+                type_token = parser->current_token.type;
+                parser_advance(parser);
+            } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
+                type_name = KRT_STRDUP(parser->current_token.value);
+                if (!type_name) {
+                    return NULL;
+                }
+                parser_advance(parser);
+            } else {
+                return NULL;
+            }
+            
+            if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                if (type_name) KRT_FREE(type_name);
+                return NULL;
+            }
+            parser_advance(parser); // consume ')'
+            
+            node = ast_create_node(AST_SIZEOF_EXPRESSION, line, col);
+            if (!node) {
+                if (type_name) KRT_FREE(type_name);
+                return NULL;
+            }
+            node->data.sizeof_expr.type_token = type_token;
+            node->data.sizeof_expr.type_name = type_name;
+            return node;
+        }
         case TOKEN_IDENTIFIER:
             if (!parser->is_unsafe_mode && parser->current_token.value[0] == '_' &&
                 strncmp(parser->current_token.value, "__lambda_", 9) != 0) {
@@ -865,93 +1467,117 @@ static ASTNode* parser_parse_primary(Parser* parser) {
             node->data.identifier_name = KRT_STRDUP(parser->current_token.value);
             parser_advance(parser);
             break;
+
         case TOKEN_LEFT_PAREN: {
-            
+
             Token peek1 = lexer_peek_token(parser->lexer);
             if (peek1.type == TOKEN_IDENTIFIER) {
-                
                 token_free(&peek1);
-                
-                parser_advance(parser); 
-                
-                char** params = NULL;
-                int param_count = 0;
-                
-                if (parser->current_token.type == TOKEN_RIGHT_PAREN) {
-                    
-                    parser_advance(parser); 
-                } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
-                    
-                    int capacity = 4;
-                    params = (char**)KRT_MALLOC(capacity * sizeof(char*));
-                    if (!params) {
-                        return NULL;
-                    }
-                    
-                    while (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-                        if (parser->current_token.type != TOKEN_IDENTIFIER) {
-                            for (int i = 0; i < param_count; i++) {
-                                KRT_FREE(params[i]);
-                            }
-                            KRT_FREE(params);
-                            return NULL;
-                        }
-                        
-                        if (param_count >= capacity) {
-                            capacity *= 2;
-                            char** new_params = (char**)KRT_REALLOC(params, capacity * sizeof(char*));
-                            if (!new_params) {
-                                for (int i = 0; i < param_count; i++) {
-                                    KRT_FREE(params[i]);
-                                }
+                if (parser_peek_after_closing_paren(parser) == TOKEN_LAMBDA) {
+                    parser_advance(parser); // consume '('
+                    char** params = NULL;
+                    int param_count = 0;
+                    if (parser->current_token.type == TOKEN_RIGHT_PAREN) {
+                        parser_advance(parser);
+                    } else {
+                        int capacity = 4;
+                        params = (char**)KRT_MALLOC(capacity * sizeof(char*));
+                        if (!params) return NULL;
+                        while (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                            if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                                for (int i = 0; i < param_count; i++) KRT_FREE(params[i]);
                                 KRT_FREE(params);
                                 return NULL;
                             }
-                            params = new_params;
+                            if (param_count >= capacity) {
+                                capacity *= 2;
+                                char** new_params = (char**)KRT_REALLOC(params, capacity * sizeof(char*));
+                                if (!new_params) {
+                                    for (int i = 0; i < param_count; i++) KRT_FREE(params[i]);
+                                    KRT_FREE(params);
+                                    return NULL;
+                                }
+                                params = new_params;
+                            }
+                            params[param_count] = KRT_STRDUP(parser->current_token.value);
+                            param_count++;
+                            parser_advance(parser);
+                            if (parser->current_token.type == TOKEN_COMMA) {
+                                parser_advance(parser);
+                            } else if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                                for (int i = 0; i < param_count; i++) KRT_FREE(params[i]);
+                                KRT_FREE(params);
+                                return NULL;
+                            }
                         }
-                        
-                        params[param_count] = KRT_STRDUP(parser->current_token.value);
-                        param_count++;
+                        parser_advance(parser); // consume ')'
+                    }
+                    if (parser->current_token.type == TOKEN_LAMBDA) {
+                        return parser_parse_lambda_expression(parser, params, param_count);
+                    }
+                    for (int i = 0; i < param_count; i++) KRT_FREE(params[i]);
+                    KRT_FREE(params);
+                    return NULL;
+                }
+                // Not a lambda: fall through to normal parenthesized expression handling
+            }
+            token_free(&peek1);
+            
+            parser_advance(parser);
+            
+            // Check for tuple type: (int, string)
+            if (parser_is_type_keyword(parser->current_token.type)) {
+                Token peek2 = lexer_peek_token(parser->lexer);
+                if (peek2.type == TOKEN_COMMA) {
+                    // This is a tuple type
+                    token_free(&peek2);
+                    
+                    int capacity = 4;
+                    KrtTokenType* types = (KrtTokenType*)KRT_MALLOC(capacity * sizeof(KrtTokenType));
+                    if (!types) {
+                        return NULL;
+                    }
+                    int type_count = 0;
+                    
+                    while (parser_is_type_keyword(parser->current_token.type)) {
+                        if (type_count >= capacity) {
+                            capacity *= 2;
+                            KrtTokenType* new_types = (KrtTokenType*)KRT_REALLOC(types, capacity * sizeof(KrtTokenType));
+                            if (!new_types) {
+                                KRT_FREE(types);
+                                return NULL;
+                            }
+                            types = new_types;
+                        }
+                        types[type_count++] = parser->current_token.type;
                         parser_advance(parser);
                         
                         if (parser->current_token.type == TOKEN_COMMA) {
                             parser_advance(parser);
                         } else if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-                            for (int i = 0; i < param_count; i++) {
-                                KRT_FREE(params[i]);
-                            }
-                            KRT_FREE(params);
+                            KRT_FREE(types);
                             return NULL;
                         }
                     }
                     
-                    parser_advance(parser); 
-                } else {
-                    
-                    ASTNode* expr = parser_parse_expression(parser);
                     if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-                        ast_destroy_node(expr);
+                        KRT_FREE(types);
                         return NULL;
                     }
                     parser_advance(parser);
-                    return expr;
+                    
+                    node = ast_create_node(AST_TUPLE_TYPE, line, col);
+                    if (!node) {
+                        KRT_FREE(types);
+                        return NULL;
+                    }
+                    node->data.tuple_type.element_types = types;
+                    node->data.tuple_type.element_count = type_count;
+                    return node;
                 }
+                token_free(&peek2);
                 
-                if (parser->current_token.type == TOKEN_LAMBDA) {
-                    return parser_parse_lambda_expression(parser, params, param_count);
-                }
-                
-                for (int i = 0; i < param_count; i++) {
-                    KRT_FREE(params[i]);
-                }
-                KRT_FREE(params);
-                
-                return NULL;
-            }
-            token_free(&peek1);
-            
-            parser_advance(parser);
-            if (parser_is_type_keyword(parser->current_token.type)) {
+                // Regular cast: (type)expression
                 KrtTokenType cast_type = parser->current_token.type;
                 parser_advance(parser);
                 if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
@@ -968,6 +1594,89 @@ static ASTNode* parser_parse_primary(Parser* parser) {
                 node->data.unary_op.is_postfix = false;
                 break;
             }
+            
+            // Check for tuple expression: (1, "hello")
+            if (parser->current_token.type == TOKEN_NUMBER || 
+                parser->current_token.type == TOKEN_STRING ||
+                parser->current_token.type == TOKEN_IDENTIFIER ||
+                parser->current_token.type == TOKEN_TRUE ||
+                parser->current_token.type == TOKEN_FALSE) {
+                
+                // Parse first element
+                ASTNode* first = parser_parse_expression(parser);
+                if (!first) {
+                    return NULL;
+                }
+                
+                if (parser->current_token.type == TOKEN_COMMA) {
+                    // This is a tuple expression
+                    int capacity = 4;
+                    ASTNode** elements = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
+                    if (!elements) {
+                        ast_destroy_node(first);
+                        return NULL;
+                    }
+                    elements[0] = first;
+                    int element_count = 1;
+                    
+                    while (parser->current_token.type == TOKEN_COMMA) {
+                        parser_advance(parser);
+                        
+                        ASTNode* elem = parser_parse_expression(parser);
+                        if (!elem) {
+                            for (int i = 0; i < element_count; i++) {
+                                ast_destroy_node(elements[i]);
+                            }
+                            KRT_FREE(elements);
+                            return NULL;
+                        }
+                        
+                        if (element_count >= capacity) {
+                            capacity *= 2;
+                            ASTNode** new_elements = (ASTNode**)KRT_REALLOC(elements, capacity * sizeof(ASTNode*));
+                            if (!new_elements) {
+                                for (int i = 0; i < element_count; i++) {
+                                    ast_destroy_node(elements[i]);
+                                }
+                                KRT_FREE(elements);
+                                return NULL;
+                            }
+                            elements = new_elements;
+                        }
+                        elements[element_count++] = elem;
+                    }
+                    
+                    if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                        for (int i = 0; i < element_count; i++) {
+                            ast_destroy_node(elements[i]);
+                        }
+                        KRT_FREE(elements);
+                        return NULL;
+                    }
+                    parser_advance(parser);
+                    
+                    node = ast_create_node(AST_TUPLE_EXPRESSION, line, col);
+                    if (!node) {
+                        for (int i = 0; i < element_count; i++) {
+                            ast_destroy_node(elements[i]);
+                        }
+                        KRT_FREE(elements);
+                        return NULL;
+                    }
+                    node->data.tuple_expr.elements = elements;
+                    node->data.tuple_expr.element_count = element_count;
+                    return node;
+                } else {
+                    // Just a parenthesized expression
+                    if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                        ast_destroy_node(first);
+                        return NULL;
+                    }
+                    parser_advance(parser);
+                    return first;
+                }
+            }
+            
             node = parser_parse_expression(parser);
             if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
                 ast_destroy_node(node);
@@ -1027,6 +1736,7 @@ static ASTNode* parser_parse_primary(Parser* parser) {
             node->data.array_literal.element_count = element_count;
             break;
         case TOKEN_NEW: return parser_parse_new_expression(parser);
+        case TOKEN_STACKALLOC: return parser_parse_stackalloc_expression(parser);
         case TOKEN_THIS:
             parser_advance(parser);
             return ast_create_node(AST_THIS, line, col);
@@ -1048,11 +1758,227 @@ static ASTNode* parser_parse_primary(Parser* parser) {
             node->data.unary_op.is_postfix = false;
             return node;
         }
-        case TOKEN_TEMPLATE: return NULL;
+        case TOKEN_OP_MULTIPLY: {
+            // Pointer dereference: *ptr
+            parser_advance(parser);
+            ASTNode* pointer = parser_parse_primary(parser);
+            if (!pointer) {
+                return NULL;
+            }
+            ASTNode* node = ast_create_node(AST_POINTER_DEREFERENCE, line, col);
+            if (!node) {
+                ast_destroy_node(pointer);
+                return NULL;
+            }
+            node->data.pointer_deref.pointer = pointer;
+            return node;
+        }
+        case TOKEN_AND: {
+            // Address-of: &var
+            parser_advance(parser);
+            ASTNode* operand = parser_parse_primary(parser);
+            if (!operand) {
+                return NULL;
+            }
+            ASTNode* node = ast_create_node(AST_ADDRESS_OF, line, col);
+            if (!node) {
+                ast_destroy_node(operand);
+                return NULL;
+            }
+            node->data.address_of.operand = operand;
+            return node;
+        }
+        case TOKEN_TEMPLATE: {
+            int line = parser->current_token.line;
+            int col = parser->current_token.column;
+            parser_advance(parser);
+            
+            if (parser->current_token.type != TOKEN_LESS) {
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            char** type_args = NULL;
+            int type_arg_count = 0;
+            
+            if (parser->current_token.type != TOKEN_GREATER) {
+                while (1) {
+                    if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                        for (int i = 0; i < type_arg_count; i++) {
+                            if (type_args[i]) KRT_FREE(type_args[i]);
+                        }
+                        KRT_FREE(type_args);
+                        return NULL;
+                    }
+                    
+                    char* type_arg = KRT_STRDUP(parser->current_token.value);
+                    if (!type_arg) {
+                        for (int i = 0; i < type_arg_count; i++) {
+                            if (type_args[i]) KRT_FREE(type_args[i]);
+                        }
+                        KRT_FREE(type_args);
+                        return NULL;
+                    }
+                    
+                    type_args = (char**)KRT_REALLOC(type_args, (type_arg_count + 1) * sizeof(char*));
+                    type_args[type_arg_count++] = type_arg;
+                    parser_advance(parser);
+                    
+                    if (parser->current_token.type == TOKEN_GREATER) {
+                        break;
+                    }
+                    if (parser->current_token.type != TOKEN_COMMA) {
+                        for (int i = 0; i < type_arg_count; i++) {
+                            if (type_args[i]) KRT_FREE(type_args[i]);
+                        }
+                        KRT_FREE(type_args);
+                        return NULL;
+                    }
+                    parser_advance(parser);
+                }
+            }
+            
+            if (parser->current_token.type != TOKEN_GREATER) {
+                for (int i = 0; i < type_arg_count; i++) {
+                    if (type_args[i]) KRT_FREE(type_args[i]);
+                }
+                KRT_FREE(type_args);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+                for (int i = 0; i < type_arg_count; i++) {
+                    if (type_args[i]) KRT_FREE(type_args[i]);
+                }
+                KRT_FREE(type_args);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode** args = NULL;
+            int arg_count = 0;
+            
+            if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                while (1) {
+                    ASTNode* arg = parser_parse_expression(parser);
+                    if (!arg) {
+                        for (int i = 0; i < type_arg_count; i++) {
+                            if (type_args[i]) KRT_FREE(type_args[i]);
+                        }
+                        KRT_FREE(type_args);
+                        for (int i = 0; i < arg_count; i++) {
+                            ast_destroy_node(args[i]);
+                        }
+                        KRT_FREE(args);
+                        return NULL;
+                    }
+                    
+                    args = (ASTNode**)KRT_REALLOC(args, (arg_count + 1) * sizeof(ASTNode*));
+                    args[arg_count++] = arg;
+                    
+                    if (parser->current_token.type == TOKEN_RIGHT_PAREN) {
+                        break;
+                    }
+                    if (parser->current_token.type != TOKEN_COMMA) {
+                        for (int i = 0; i < type_arg_count; i++) {
+                            if (type_args[i]) KRT_FREE(type_args[i]);
+                        }
+                        KRT_FREE(type_args);
+                        for (int i = 0; i < arg_count; i++) {
+                            ast_destroy_node(args[i]);
+                        }
+                        KRT_FREE(args);
+                        return NULL;
+                    }
+                    parser_advance(parser);
+                }
+            }
+            
+            if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                for (int i = 0; i < type_arg_count; i++) {
+                    if (type_args[i]) KRT_FREE(type_args[i]);
+                }
+                KRT_FREE(type_args);
+                for (int i = 0; i < arg_count; i++) {
+                    ast_destroy_node(args[i]);
+                }
+                KRT_FREE(args);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode* node = ast_create_node(AST_TEMPLATE_INSTANTIATION, line, col);
+            if (!node) {
+                for (int i = 0; i < type_arg_count; i++) {
+                    if (type_args[i]) KRT_FREE(type_args[i]);
+                }
+                KRT_FREE(type_args);
+                for (int i = 0; i < arg_count; i++) {
+                    ast_destroy_node(args[i]);
+                }
+                KRT_FREE(args);
+                return NULL;
+            }
+            
+            node->data.template_instantiation.name = NULL;
+            node->data.template_instantiation.type_args = type_args;
+            node->data.template_instantiation.type_arg_count = type_arg_count;
+            node->data.template_instantiation.args = args;
+            node->data.template_instantiation.arg_count = arg_count;
+            
+            return node;
+        }
         
         case TOKEN_FROM:
             return parser_parse_linq_query(parser);
-        default: return NULL;
+        case TOKEN_DEFAULT: {
+            int line = parser->current_token.line;
+            int col = parser->current_token.column;
+            parser_advance(parser);
+            
+            if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            char* type_name = NULL;
+            ASTNode* type_expr = NULL;
+            
+            if (parser->current_token.type == TOKEN_IDENTIFIER) {
+                type_name = KRT_STRDUP(parser->current_token.value);
+                parser_advance(parser);
+                
+                if (parser->current_token.type == TOKEN_LESS) {
+                    type_expr = parser_parse_expression(parser);
+                }
+            } else if (parser_is_type_keyword(parser->current_token.type)) {
+                const char* type_str = token_type_to_string(parser->current_token.type);
+                type_name = KRT_STRDUP(type_str ? type_str : "UNKNOWN");
+                parser_advance(parser);
+            } else {
+                return NULL;
+            }
+            
+            if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                if (type_name) KRT_FREE(type_name);
+                if (type_expr) ast_destroy_node(type_expr);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode* node = ast_create_node(AST_DEFAULT_EXPRESSION, line, col);
+            if (!node) {
+                if (type_name) KRT_FREE(type_name);
+                if (type_expr) ast_destroy_node(type_expr);
+                return NULL;
+            }
+            node->data.default_expr.type_name = type_name;
+            node->data.default_expr.type_expr = type_expr;
+            return node;
+        }
+        default:
+            break;
     }
     return node;
 }
@@ -1120,11 +2046,12 @@ static ASTNode* parser_parse_binary_operation(Parser* parser, int precedence) {
 }
 
 static ASTNode* parser_parse_postfix_expression(Parser* parser) {
-    ASTNode* left = parser_parse_primary(parser);
+    ASTNode* left = parser_parse_primary_debug(parser);
     if (!left) {
         return NULL;
     }
     while (parser->current_token.type == TOKEN_DOT ||
+           parser->current_token.type == TOKEN_QUESTION_DOT ||
            parser->current_token.type == TOKEN_DOUBLE_COLON ||
            parser->current_token.type == TOKEN_LEFT_BRACKET) {
         int line = parser->current_token.line;
@@ -1152,7 +2079,9 @@ static ASTNode* parser_parse_postfix_expression(Parser* parser) {
                 ast_destroy_node(index);
                 return NULL;
             }
-        } else if (parser->current_token.type == TOKEN_DOT) {
+        } else if (parser->current_token.type == TOKEN_DOT ||
+                   parser->current_token.type == TOKEN_QUESTION_DOT) {
+            int is_null_conditional = (parser->current_token.type == TOKEN_QUESTION_DOT);
             parser_advance(parser);
             if (parser->current_token.type != TOKEN_IDENTIFIER) {
                 ast_destroy_node(left);
@@ -1164,21 +2093,44 @@ static ASTNode* parser_parse_postfix_expression(Parser* parser) {
                 return NULL;
             }
             parser_advance(parser);
-            ASTNode* node = ast_create_node(AST_MEMBER_ACCESS, line, col);
-            if (!node) {
-                KRT_FREE(member_name);
-                ast_destroy_node(left);
-                return NULL;
-            }
-            node->data.member_access.object = left;
-            node->data.member_access.member_name = member_name;
-            left = node;
-            if (parser->current_token.type == TOKEN_LEFT_PAREN) {
-                ASTNode* call_node = parser_parse_call(parser, left);
-                if (!call_node) {
+            
+            if (is_null_conditional) {
+                ASTNode* node = ast_create_node(AST_NULL_CONDITIONAL, line, col);
+                if (!node) {
+                    KRT_FREE(member_name);
+                    ast_destroy_node(left);
                     return NULL;
                 }
-                left = call_node;
+                node->data.null_conditional.expression = left;
+                node->data.null_conditional.member_name = member_name;
+                node->data.null_conditional.is_method_call = 0;
+                
+                if (parser->current_token.type == TOKEN_LEFT_PAREN) {
+                    node->data.null_conditional.is_method_call = 1;
+                    ASTNode* call_node = parser_parse_call(parser, left);
+                    if (!call_node) {
+                        return NULL;
+                    }
+                    node->data.null_conditional.arguments = call_node;
+                }
+                left = node;
+            } else {
+                ASTNode* node = ast_create_node(AST_MEMBER_ACCESS, line, col);
+                if (!node) {
+                    KRT_FREE(member_name);
+                    ast_destroy_node(left);
+                    return NULL;
+                }
+                node->data.member_access.object = left;
+                node->data.member_access.member_name = member_name;
+                left = node;
+                if (parser->current_token.type == TOKEN_LEFT_PAREN) {
+                    ASTNode* call_node = parser_parse_call(parser, left);
+                    if (!call_node) {
+                        return NULL;
+                    }
+                    left = call_node;
+                }
             }
         } else if (parser->current_token.type == TOKEN_DOUBLE_COLON) {
             parser_advance(parser);
@@ -1298,6 +2250,54 @@ static ASTNode* parser_parse_postfix_expression(Parser* parser) {
         node->data.unary_op.is_postfix = true;
         return node;
     }
+    
+    if (parser->current_token.type == TOKEN_IS || parser->current_token.type == TOKEN_AS) {
+        int line = parser->current_token.line;
+        int col = parser->current_token.column;
+        KrtTokenType op_type = parser->current_token.type;
+        parser_advance(parser);
+        
+        char* type_name = NULL;
+        ASTNode* type_expr = NULL;
+        
+        if (parser->current_token.type == TOKEN_IDENTIFIER) {
+            type_name = KRT_STRDUP(parser->current_token.value);
+            parser_advance(parser);
+            
+            if (parser->current_token.type == TOKEN_LESS) {
+                type_expr = parser_parse_expression(parser);
+            }
+        } else if (parser_is_type_keyword(parser->current_token.type)) {
+            const char* type_str = token_type_to_string(parser->current_token.type);
+            type_name = KRT_STRDUP(type_str ? type_str : "UNKNOWN");
+            parser_advance(parser);
+        } else {
+            return NULL;
+        }
+        
+        ASTNode* node = ast_create_node(
+            op_type == TOKEN_IS ? AST_IS_EXPRESSION : AST_AS_EXPRESSION,
+            line, col
+        );
+        if (!node) {
+            if (type_name) KRT_FREE(type_name);
+            if (type_expr) ast_destroy_node(type_expr);
+            ast_destroy_node(left);
+            return NULL;
+        }
+        
+        if (op_type == TOKEN_IS) {
+            node->data.is_expr.expression = left;
+            node->data.is_expr.type_name = type_name;
+            node->data.is_expr.type_expr = type_expr;
+        } else {
+            node->data.as_expr.expression = left;
+            node->data.as_expr.type_name = type_name;
+            node->data.as_expr.type_expr = type_expr;
+        }
+        return node;
+    }
+    
     return left;
 }
 
@@ -1339,11 +2339,40 @@ static ASTNode* parser_parse_ternary_operation(Parser* parser) {
         node->data.ternary_op.false_value = false_value;
         return node;
     }
+    if (parser->current_token.type == TOKEN_NULL_COALESCING) {
+        int line = parser->current_token.line;
+        int col = parser->current_token.column;
+        parser_advance(parser);
+        ASTNode* right = parser_parse_binary_operation(parser, 0);
+        if (PARSER_UNLIKELY(!right)) {
+            ast_destroy_node(condition);
+            return NULL;
+        }
+        ASTNode* node = ast_create_node(AST_NULL_COALESCING, line, col);
+        if (PARSER_UNLIKELY(!node)) {
+            ast_destroy_node(condition);
+            ast_destroy_node(right);
+            return NULL;
+        }
+        node->data.null_coalescing.left = condition;
+        node->data.null_coalescing.right = right;
+        return node;
+    }
     return condition;
 }
 
 static ASTNode* parser_parse_expression(Parser* parser) {
-    return parser_parse_ternary_operation(parser);
+    printf("[DEBUG] parser_parse_expression: starting, token=%d, value=%s\n", parser->current_token.type, parser->current_token.value ? parser->current_token.value : "null");
+    ASTNode* result = parser_parse_ternary_operation(parser);
+    printf("[DEBUG] parser_parse_expression: result=%p, next_token=%d\n", (void*)result, parser->current_token.type);
+    return result;
+}
+
+static ASTNode* parser_parse_primary_debug(Parser* parser) {
+    printf("[DEBUG] parser_parse_primary: token=%d, value=%s\n", parser->current_token.type, parser->current_token.value ? parser->current_token.value : "null");
+    ASTNode* result = parser_parse_primary(parser);
+    printf("[DEBUG] parser_parse_primary: result=%p, next_token=%d\n", (void*)result, parser->current_token.type);
+    return result;
 }
 
 static ASTNode* parser_parse_variable_declaration(Parser* parser) {
@@ -1351,14 +2380,21 @@ static ASTNode* parser_parse_variable_declaration(Parser* parser) {
     int col = parser->current_token.column;
     int is_let = (parser->current_token.type == TOKEN_LET) ? 1 : 0;
     parser_advance(parser);
-    if (parser->current_token.type != TOKEN_IDENTIFIER) {
+    char* name = NULL;
+    if (parser->current_token.type == TOKEN_IDENTIFIER) {
+        name = KRT_STRDUP(parser->current_token.value);
+        parser_advance(parser);
+    } else if (parser->current_token.type >= TOKEN_OP_ADDITION &&
+               parser->current_token.type <= TOKEN_OP_EXPLICIT) {
+        const char* op_name = token_type_to_string(parser->current_token.type);
+        name = KRT_STRDUP(op_name ? op_name : "op_Unknown");
+        parser_advance(parser);
+    } else {
         return NULL;
     }
-    char* name = KRT_STRDUP(parser->current_token.value);
     if (!name) {
         return NULL;
     }
-    parser_advance(parser);
     ASTNode* array_size = NULL;
     bool is_array = false;
     if (parser->current_token.type == TOKEN_LEFT_BRACKET) {
@@ -1380,12 +2416,39 @@ static ASTNode* parser_parse_variable_declaration(Parser* parser) {
         }
         parser_advance(parser);
     }
+    KrtTokenType type_token = TOKEN_UNKNOWN;
+    char* type_name = NULL;
+    if (parser->current_token.type == TOKEN_COLON) {
+        parser_advance(parser);
+        if (parser_is_type_keyword(parser->current_token.type)) {
+            type_token = parser->current_token.type;
+            parser_advance(parser);
+        } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
+            type_token = TOKEN_IDENTIFIER;
+            type_name = KRT_STRDUP(parser->current_token.value);
+            if (!type_name) {
+                KRT_FREE(name);
+                if (array_size) {
+                    ast_destroy_node(array_size);
+                }
+                return NULL;
+            }
+            parser_advance(parser);
+        } else {
+            KRT_FREE(name);
+            if (array_size) {
+                ast_destroy_node(array_size);
+            }
+            return NULL;
+        }
+    }
     ASTNode* value = NULL;
     if (parser->current_token.type == TOKEN_ASSIGN) {
         parser_advance(parser);
         value = parser_parse_expression(parser);
         if (!value) {
             KRT_FREE(name);
+            KRT_FREE(type_name);
             if (array_size) {
                 ast_destroy_node(array_size);
             }
@@ -1395,6 +2458,7 @@ static ASTNode* parser_parse_variable_declaration(Parser* parser) {
     ASTNode* node = ast_create_node(AST_VARIABLE_DECLARATION, line, col);
     if (!node) {
         KRT_FREE(name);
+        KRT_FREE(type_name);
         if (value) {
             ast_destroy_node(value);
         }
@@ -1405,6 +2469,8 @@ static ASTNode* parser_parse_variable_declaration(Parser* parser) {
     }
     node->data.variable_decl.name = name;
     node->data.variable_decl.value = value;
+    node->data.variable_decl.type = type_token;
+    node->data.variable_decl.template_instantiation_type = type_name;
     node->data.variable_decl.array_size = array_size;
     node->data.variable_decl.is_array = is_array;
     node->data.variable_decl.is_let = is_let;
@@ -1415,8 +2481,6 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
     if (!parser || parser->current_token.type != TOKEN_STATIC) {
         return NULL;
     }
-    int line = parser->current_token.line;
-    int col = parser->current_token.column;
     parser_advance(parser);
     if (parser->current_token.type == TOKEN_FUNCTION) {
         int func_line = parser->current_token.line;
@@ -1444,13 +2508,16 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
         parser_advance(parser);
         char** parameters = NULL;
         KrtTokenType* parameter_types = NULL;
+        int* parameter_is_params = NULL;
+        int* parameter_is_array = NULL;
+        ASTNode** parameter_default_values = NULL;
         int parameter_count = 0;
-        if (!parser_parse_parameter_list(parser, &parameters, &parameter_types, &parameter_count)) {
+        if (!parser_parse_parameter_list(parser, &parameters, &parameter_types, &parameter_is_params, &parameter_is_array, &parameter_default_values, &parameter_count)) {
             KRT_FREE(name);
             return NULL;
         }
         if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-            parser_free_parameter_list(parameters, parameter_types, parameter_count);
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
             KRT_FREE(name);
             return NULL;
         }
@@ -1459,7 +2526,7 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
         if (parser->current_token.type == TOKEN_COLON) {
             parser_advance(parser);
             if (!parser_is_type_keyword(parser->current_token.type)) {
-                parser_free_parameter_list(parameters, parameter_types, parameter_count);
+                parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
                 KRT_FREE(name);
                 return NULL;
             }
@@ -1471,20 +2538,23 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
         if (parser->current_token.type == TOKEN_LEFT_BRACE) {
             body = parser_parse_block(parser);
             if (!body) {
-                parser_free_parameter_list(parameters, parameter_types, parameter_count);
+                parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
                 KRT_FREE(name);
                 return NULL;
             }
         } else if (parser->current_token.type == TOKEN_SEMICOLON) {
             parser_advance(parser);
         } else {
-            parser_free_parameter_list(parameters, parameter_types, parameter_count);
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
             KRT_FREE(name);
             return NULL;
         }
-        ASTNode* node = parser_create_function_node(parser, 1, name,
+        ASTNode* node = parser_create_function_node(parser, 1, 0, name,
                                                 parameters,
                                                 parameter_types,
+                                                parameter_is_params,
+                                                parameter_is_array,
+                                                parameter_default_values,
                                                 parameter_count,
                                                 body,
                                                 return_type_token,
@@ -1493,7 +2563,7 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
             if (body) {
                 ast_destroy_node(body);
             }
-            parser_free_parameter_list(parameters, parameter_types, parameter_count);
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
             KRT_FREE(name);
             return NULL;
         }
@@ -1549,6 +2619,20 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
             return NULL;
         }
         parser_advance(parser);
+
+        // Parse type annotation if present
+        KrtTokenType type_token = TOKEN_UNKNOWN;
+        if (parser->current_token.type == TOKEN_COLON) {
+            parser_advance(parser);
+            if (parser_is_type_keyword(parser->current_token.type) || parser->current_token.type == TOKEN_IDENTIFIER) {
+                type_token = parser->current_token.type;
+                parser_advance(parser);
+            } else {
+                KRT_FREE(name);
+                return NULL;
+            }
+        }
+
         ASTNode* value = NULL;
         if (parser->current_token.type == TOKEN_ASSIGN) {
             parser_advance(parser);
@@ -1571,7 +2655,7 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
         }
         node->data.static_variable_decl.name = name;
         node->data.static_variable_decl.value = value;
-        node->data.static_variable_decl.type = TOKEN_UNKNOWN;
+        node->data.static_variable_decl.type = type_token;
         return node;
     }
     if (parser->current_token.type == TOKEN_IDENTIFIER) {
@@ -1608,30 +2692,6 @@ static ASTNode* parser_parse_static_member_declaration(Parser* parser) {
         return node;
     }
     return NULL;
-}
-
-static ASTNode* parser_parse_static_variable_declaration(Parser* parser) {
-    ASTNode* node = parser_parse_static_member_declaration(parser);
-    if (!node) {
-        return NULL;
-    }
-    if (node->type != AST_STATIC_VARIABLE_DECLARATION) {
-        ast_destroy_node(node);
-        return NULL;
-    }
-    return node;
-}
-
-static ASTNode* parser_parse_static_function_declaration(Parser* parser) {
-    ASTNode* node = parser_parse_static_member_declaration(parser);
-    if (!node) {
-        return NULL;
-    }
-    if (node->type != AST_STATIC_FUNCTION_DECLARATION) {
-        ast_destroy_node(node);
-        return NULL;
-    }
-    return node;
 }
 
 static ASTNode* parser_parse_assignment_from_left(Parser* parser, ASTNode* left) {
@@ -1708,8 +2768,24 @@ static ASTNode* parser_parse_assignment_from_left(Parser* parser, ASTNode* left)
             ast_destroy_node(left);
             return node;
         }
+    } else if (left->type == AST_MEMBER_ACCESS) {
+        if (operator == TOKEN_ASSIGN) {
+            ASTNode* node = ast_create_node(AST_BINARY_OPERATION, line, col);
+            if (!node) {
+                ast_destroy_node(left);
+                ast_destroy_node(value);
+                return NULL;
+            }
+            node->data.binary_op.left = left;
+            node->data.binary_op.operator = operator;
+            node->data.binary_op.right = value;
+            return node;
+        }
+        ast_destroy_node(left);
+        ast_destroy_node(value);
+        return NULL;
     }
-    
+
     ast_destroy_node(left);
     ast_destroy_node(value);
     return NULL;
@@ -1829,18 +2905,24 @@ static ASTNode* parser_parse_access_modifier(Parser* parser) {
     int col = parser->current_token.column;
     KrtTokenType access_type = parser->current_token.type;
     parser_advance(parser);
+    int is_virtual = 0;
+    if (parser->current_token.type == TOKEN_VIRTUAL) {
+        is_virtual = 1;
+        parser_advance(parser);
+    }
     if (parser->current_token.type == TOKEN_STATIC) {
         ASTNode* member = parser_parse_static_member_declaration(parser);
         if (!member) {
             return NULL;
         }
-        ASTNode* node = ast_create_node(AST_ACCESS_MODIFIER, line, col);
+        ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
         if (!node) {
             ast_destroy_node(member);
             return NULL;
         }
         node->data.access_modifier.access_modifier = access_type;
         node->data.access_modifier.member = member;
+        node->data.access_modifier.is_virtual = is_virtual;
         return node;
     } else if (parser->current_class && 
                parser->current_token.type == TOKEN_IDENTIFIER &&
@@ -1849,13 +2931,14 @@ static ASTNode* parser_parse_access_modifier(Parser* parser) {
         if (!member) {
             return NULL;
         }
-        ASTNode* node = ast_create_node(AST_ACCESS_MODIFIER, line, col);
+        ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
         if (!node) {
             ast_destroy_node(member);
             return NULL;
         }
         node->data.access_modifier.access_modifier = access_type;
         node->data.access_modifier.member = member;
+        node->data.access_modifier.is_virtual = is_virtual;
         return node;
     } else if (parser->current_class && 
                parser->current_token.type == TOKEN_TILDE) {
@@ -1867,13 +2950,14 @@ static ASTNode* parser_parse_access_modifier(Parser* parser) {
             if (!member) {
                 return NULL;
             }
-            ASTNode* node = ast_create_node(AST_ACCESS_MODIFIER, line, col);
+            ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
             if (!node) {
                 ast_destroy_node(member);
                 return NULL;
             }
             node->data.access_modifier.access_modifier = access_type;
             node->data.access_modifier.member = member;
+            node->data.access_modifier.is_virtual = is_virtual;
             return node;
         }
         token_free(&peek);
@@ -1883,39 +2967,88 @@ static ASTNode* parser_parse_access_modifier(Parser* parser) {
         if (!member) {
             return NULL;
         }
-        ASTNode* node = ast_create_node(AST_ACCESS_MODIFIER, line, col);
+        ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
         if (!node) {
             ast_destroy_node(member);
             return NULL;
         }
         node->data.access_modifier.access_modifier = access_type;
         node->data.access_modifier.member = member;
+        node->data.access_modifier.is_virtual = is_virtual;
         return node;
     } else if (parser->current_token.type == TOKEN_FUNCTION) {
-        ASTNode* member = parser_parse_function_declaration(parser);
+        ASTNode* member = NULL;
+        if (parser->current_class) {
+            Token peek = lexer_peek_token(parser->lexer);
+            if (peek.type == TOKEN_IDENTIFIER && strcmp(peek.value, parser->current_class) == 0) {
+                token_free(&peek);
+                member = parser_parse_constructor_declaration(parser);
+            } else {
+                token_free(&peek);
+            }
+        }
+        if (!member) {
+            member = parser_parse_function_declaration(parser);
+        }
         if (!member) {
             return NULL;
         }
-        ASTNode* node = ast_create_node(AST_ACCESS_MODIFIER, line, col);
+        ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
         if (!node) {
             ast_destroy_node(member);
             return NULL;
         }
         node->data.access_modifier.access_modifier = access_type;
         node->data.access_modifier.member = member;
+        node->data.access_modifier.is_virtual = is_virtual;
         return node;
     } else if (parser->current_token.type == TOKEN_VAR || parser->current_token.type == TOKEN_LET) {
         ASTNode* member = parser_parse_variable_declaration(parser);
         if (!member) {
             return NULL;
         }
-        ASTNode* node = ast_create_node(AST_ACCESS_MODIFIER, line, col);
+        ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
         if (!node) {
             ast_destroy_node(member);
             return NULL;
         }
         node->data.access_modifier.access_modifier = access_type;
         node->data.access_modifier.member = member;
+        node->data.access_modifier.is_virtual = is_virtual;
+        return node;
+    } else if (parser->current_token.type == TOKEN_CLASS || parser->current_token.type == TOKEN_STRUCT) {
+        printf("[DEBUG] parser_parse_access_modifier: parsing class/struct, token=%d\n", parser->current_token.type);
+        ASTNode* member = parser_parse_class_declaration(parser);
+        printf("[DEBUG] parser_parse_access_modifier: class_declaration returned=%p, type=%d\n", (void*)member, member ? (int)member->type : -1);
+        if (!member) {
+            return NULL;
+        }
+        ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
+        if (!node) {
+            ast_destroy_node(member);
+            return NULL;
+        }
+        node->data.access_modifier.access_modifier = access_type;
+        node->data.access_modifier.member = member;
+        node->data.access_modifier.is_virtual = is_virtual;
+        printf("[DEBUG] parser_parse_access_modifier: created access_modifier node=%p, member=%p, member_type=%d\n", (void*)node, (void*)member, member->type);
+        return node;
+    } else if (parser->current_token.type == TOKEN_DELEGATE) {
+        printf("[DEBUG] parser_parse_access_modifier: parsing delegate, token=%d\n", parser->current_token.type);
+        ASTNode* member = parser_parse_delegate_declaration(parser);
+        printf("[DEBUG] parser_parse_access_modifier: delegate_declaration returned=%p, type=%d\n", (void*)member, member ? (int)member->type : -1);
+        if (!member) {
+            return NULL;
+        }
+        ASTNode* node = PARSER_CREATE_NODE(AST_ACCESS_MODIFIER, line, col);
+        if (!node) {
+            ast_destroy_node(member);
+            return NULL;
+        }
+        node->data.access_modifier.access_modifier = access_type;
+        node->data.access_modifier.member = member;
+        node->data.access_modifier.is_virtual = is_virtual;
+        printf("[DEBUG] parser_parse_access_modifier: created access_modifier node=%p, member=%p, member_type=%d\n", (void*)node, (void*)member, member->type);
         return node;
     }
     return NULL;
@@ -1924,9 +3057,19 @@ static ASTNode* parser_parse_access_modifier(Parser* parser) {
 static ASTNode* parser_parse_constructor_declaration(Parser* parser) {
     int line = parser->current_token.line;
     int col = parser->current_token.column;
+    if (parser->current_token.type == TOKEN_FUNCTION) {
+        parser_advance(parser);
+    }
+    if (parser->current_token.type != TOKEN_IDENTIFIER ||
+        !parser->current_class ||
+        strcmp(parser->current_token.value, parser->current_class) != 0) {
+        return NULL;
+    }
     parser_advance(parser);
     char** parameters = NULL;
     KrtTokenType* parameter_types = NULL;
+    int* parameter_is_params = NULL;
+    int* parameter_is_array = NULL;
     int parameter_count = 0;
     if (parser->current_token.type != TOKEN_LEFT_PAREN) {
         return NULL;
@@ -1935,59 +3078,136 @@ static ASTNode* parser_parse_constructor_declaration(Parser* parser) {
     if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
         while (1) {
             KrtTokenType param_type = TOKEN_UNKNOWN;
-            if ((parser->current_token.type >= TOKEN_INT8 && parser->current_token.type <= TOKEN_VOID) ||
-                parser->current_token.type == TOKEN_STRING) {
+            if (parser_is_type_keyword(parser->current_token.type)) {
                 param_type = parser->current_token.type;
                 parser_advance(parser);
             }
             if (parser->current_token.type != TOKEN_IDENTIFIER) {
-                parser_free_parameter_list(parameters, parameter_types, parameter_count);
+                parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
                 return NULL;
             }
             char** new_parameters = KRT_REALLOC(parameters, (parameter_count + 1) * sizeof(char*));
             KrtTokenType* new_parameter_types = KRT_REALLOC(parameter_types, (parameter_count + 1) * sizeof(KrtTokenType));
-            if (!new_parameters || !new_parameter_types) {
+            int* new_is_params = KRT_REALLOC(parameter_is_params, (parameter_count + 1) * sizeof(int));
+            if (!new_parameters || !new_parameter_types || !new_is_params) {
                 KRT_FREE(parser->current_token.value);
-                parser_free_parameter_list(parameters, parameter_types, parameter_count);
+                parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
                 return NULL;
             }
             parameters = new_parameters;
             parameter_types = new_parameter_types;
+            parameter_is_params = new_is_params;
             parameters[parameter_count] = KRT_STRDUP(parser->current_token.value);
             parameter_types[parameter_count] = param_type;
+            parameter_is_params[parameter_count] = 0;
             parameter_count++;
             parser_advance(parser);
+            if (parser->current_token.type == TOKEN_COLON) {
+                parser_advance(parser);
+                if (parser_is_type_keyword(parser->current_token.type)) {
+                    parameter_types[parameter_count - 1] = parser->current_token.type;
+                    parser_advance(parser);
+                } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
+                    parameter_types[parameter_count - 1] = TOKEN_UNKNOWN;
+                    parser_advance(parser);
+                } else {
+                    parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+                    return NULL;
+                }
+            }
             if (parser->current_token.type == TOKEN_RIGHT_PAREN) {
                 break;
             }
             if (parser->current_token.type != TOKEN_COMMA) {
-                parser_free_parameter_list(parameters, parameter_types, parameter_count);
+                parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
                 return NULL;
             }
             parser_advance(parser);
         }
     }
     if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
         return NULL;
     }
     parser_advance(parser);
+
+    ASTNode** base_arguments = NULL;
+    int base_argument_count = 0;
+    int has_base_call = 0;
+    if (parser->current_token.type == TOKEN_COLON) {
+        has_base_call = 1;
+        parser_advance(parser);
+        if ((parser->current_token.type != TOKEN_BASE) &&
+            (parser->current_token.type != TOKEN_IDENTIFIER || strcmp(parser->current_token.value, "base") != 0)) {
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+            return NULL;
+        }
+        parser_advance(parser);
+        if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+            return NULL;
+        }
+        parser_advance(parser);
+        if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+            while (1) {
+                ASTNode* arg = parser_parse_expression(parser);
+                if (!arg) {
+                    parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+                    for (int i = 0; i < base_argument_count; i++) ast_destroy_node(base_arguments[i]);
+                    KRT_FREE(base_arguments);
+                    return NULL;
+                }
+                ASTNode** new_args = KRT_REALLOC(base_arguments, (base_argument_count + 1) * sizeof(ASTNode*));
+                if (!new_args) {
+                    parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+                    ast_destroy_node(arg);
+                    for (int i = 0; i < base_argument_count; i++) ast_destroy_node(base_arguments[i]);
+                    KRT_FREE(base_arguments);
+                    return NULL;
+                }
+                base_arguments = new_args;
+                base_arguments[base_argument_count++] = arg;
+                if (parser->current_token.type == TOKEN_RIGHT_PAREN) break;
+                if (parser->current_token.type != TOKEN_COMMA) {
+                    parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+                    for (int i = 0; i < base_argument_count; i++) ast_destroy_node(base_arguments[i]);
+                    KRT_FREE(base_arguments);
+                    return NULL;
+                }
+                parser_advance(parser);
+            }
+        }
+        if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+            for (int i = 0; i < base_argument_count; i++) ast_destroy_node(base_arguments[i]);
+            KRT_FREE(base_arguments);
+            return NULL;
+        }
+        parser_advance(parser);
+    }
+
     ASTNode* body = NULL;
     if (parser->current_token.type == TOKEN_LEFT_BRACE) {
         body = parser_parse_block(parser);
         if (!body) {
-            parser_free_parameter_list(parameters, parameter_types, parameter_count);
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+            for (int i = 0; i < base_argument_count; i++) ast_destroy_node(base_arguments[i]);
+            KRT_FREE(base_arguments);
             return NULL;
         }
     } else if (parser->current_token.type == TOKEN_SEMICOLON) {
         parser_advance(parser);
     } else {
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+        for (int i = 0; i < base_argument_count; i++) ast_destroy_node(base_arguments[i]);
+        KRT_FREE(base_arguments);
         return NULL;
     }
     ASTNode* node = ast_create_node(AST_CONSTRUCTOR_DECLARATION, line, col);
     if (!node) {
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, NULL, parameter_count);
+        for (int i = 0; i < base_argument_count; i++) ast_destroy_node(base_arguments[i]);
+        KRT_FREE(base_arguments);
         if (body) {
             ast_destroy_node(body);
         }
@@ -1997,6 +3217,9 @@ static ASTNode* parser_parse_constructor_declaration(Parser* parser) {
     node->data.constructor_decl.parameter_types = parameter_types;
     node->data.constructor_decl.parameter_count = parameter_count;
     node->data.constructor_decl.body = body;
+    node->data.constructor_decl.base_arguments = base_arguments;
+    node->data.constructor_decl.base_argument_count = base_argument_count;
+    node->data.constructor_decl.has_base_call = has_base_call;
     return node;
 }
 
@@ -2062,6 +3285,18 @@ static ASTNode* parser_parse_destructor_declaration(Parser* parser) {
 static ASTNode* parser_parse_function_declaration(Parser* parser) {
     int line = parser->current_token.line;
     int col = parser->current_token.column;
+    printf("[DEBUG] parser_parse_function_declaration: starting, token=%d, value=%s\n", parser->current_token.type, parser->current_token.value ? parser->current_token.value : "null");
+    
+    // Check for async modifier
+    int is_async = 0;
+    if (parser->current_token.type == TOKEN_ASYNC) {
+        is_async = 1;
+        parser_advance(parser);
+    }
+    
+    if (parser->current_token.type != TOKEN_FUNCTION) {
+        return NULL;
+    }
     parser_advance(parser);
 
     KrtTokenType return_type = TOKEN_INT32;  
@@ -2083,50 +3318,101 @@ static ASTNode* parser_parse_function_declaration(Parser* parser) {
         parser_advance(parser);
     }
 
-    if (parser->current_token.type != TOKEN_IDENTIFIER) {
+    char* name = NULL;
+    if (parser->current_token.type == TOKEN_IDENTIFIER) {
+        name = KRT_STRDUP(parser->current_token.value);
+        parser_advance(parser);
+    } else if (parser->current_token.type >= TOKEN_OP_ADDITION &&
+               parser->current_token.type <= TOKEN_OP_EXPLICIT) {
+        const char* op_name = token_type_to_string(parser->current_token.type);
+        name = KRT_STRDUP(op_name ? op_name : "op_Unknown");
+        parser_advance(parser);
+    } else {
+        printf("[DEBUG] parser_parse_function_declaration: expected IDENTIFIER or OPERATOR, got %d\n", parser->current_token.type);
         return NULL;
     }
-    char* name = KRT_STRDUP(parser->current_token.value);
     if (!name) {
         return NULL;
     }
-    parser_advance(parser);
+    printf("[DEBUG] parser_parse_function_declaration: name=%s, next_token=%d\n", name, parser->current_token.type);
     if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+        printf("[DEBUG] parser_parse_function_declaration: expected LEFT_PAREN, got %d\n", parser->current_token.type);
         KRT_FREE(name);
         return NULL;
     }
     parser_advance(parser);
     char** parameters = NULL;
     KrtTokenType* parameter_types = NULL;
+    int* parameter_is_params = NULL;
+    int* parameter_is_array = NULL;
+    ASTNode** parameter_default_values = NULL;
     int parameter_count = 0;
-    if (!parser_parse_parameter_list(parser, &parameters, &parameter_types, &parameter_count)) {
+    if (!parser_parse_parameter_list(parser, &parameters, &parameter_types, &parameter_is_params, &parameter_is_array, &parameter_default_values, &parameter_count)) {
+        printf("[DEBUG] parser_parse_function_declaration: parameter_list parsing failed\n");
         KRT_FREE(name);
         return NULL;
     }
+    printf("[DEBUG] parser_parse_function_declaration: parameter_count=%d\n", parameter_count);
     if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        printf("[DEBUG] parser_parse_function_declaration: expected RIGHT_PAREN, got %d\n", parser->current_token.type);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
         KRT_FREE(name);
         return NULL;
     }
     parser_advance(parser);
+    printf("[DEBUG] parser_parse_function_declaration: after params, token=%d\n", parser->current_token.type);
+    
+    // Support return type declaration: function Name(): type
+    if (parser->current_token.type == TOKEN_COLON) {
+        parser_advance(parser);
+        if (parser->current_token.type == TOKEN_VOID ||
+            parser->current_token.type == TOKEN_INT8 ||
+            parser->current_token.type == TOKEN_INT16 ||
+            parser->current_token.type == TOKEN_INT32 ||
+            parser->current_token.type == TOKEN_INT64 ||
+            parser->current_token.type == TOKEN_UINT8 ||
+            parser->current_token.type == TOKEN_UINT16 ||
+            parser->current_token.type == TOKEN_UINT32 ||
+            parser->current_token.type == TOKEN_UINT64 ||
+            parser->current_token.type == TOKEN_FLOAT32 ||
+            parser->current_token.type == TOKEN_FLOAT64 ||
+            parser->current_token.type == TOKEN_BOOL ||
+            parser->current_token.type == TOKEN_CHAR ||
+            parser->current_token.type == TOKEN_TYPE_STRING ||
+            parser->current_token.type == TOKEN_IDENTIFIER) {
+            return_type = parser->current_token.type;
+            parser_advance(parser);
+        } else {
+            printf("[DEBUG] parser_parse_function_declaration: expected return type after :, got %d\n", parser->current_token.type);
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
+            KRT_FREE(name);
+            return NULL;
+        }
+    }
+    
     ASTNode* body = NULL;
     if (parser->current_token.type == TOKEN_LEFT_BRACE) {
         body = parser_parse_block(parser);
         if (!body) {
-            parser_free_parameter_list(parameters, parameter_types, parameter_count);
+            printf("[DEBUG] parser_parse_function_declaration: block parsing failed\n");
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
             KRT_FREE(name);
             return NULL;
         }
     } else if (parser->current_token.type == TOKEN_SEMICOLON) {
         parser_advance(parser);
     } else {
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        printf("[DEBUG] parser_parse_function_declaration: expected LEFT_BRACE or SEMICOLON, got %d\n", parser->current_token.type);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
         KRT_FREE(name);
         return NULL;
     }
-    ASTNode* node = parser_create_function_node(parser, 0, name,
+    ASTNode* node = parser_create_function_node(parser, 0, is_async, name,
                                                 parameters,
                                                 parameter_types,
+                                                parameter_is_params,
+                                                parameter_is_array,
+                                                parameter_default_values,
                                                 parameter_count,
                                                 body,
                                                 return_type,
@@ -2135,10 +3421,12 @@ static ASTNode* parser_parse_function_declaration(Parser* parser) {
         if (body) {
             ast_destroy_node(body);
         }
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
         KRT_FREE(name);
+        printf("[DEBUG] parser_parse_function_declaration: parser_create_function_node failed\n");
         return NULL;
     }
+    printf("[DEBUG] parser_parse_function_declaration: created node=%p, name=%s\n", (void*)node, name);
     return node;
 }
 
@@ -2154,13 +3442,16 @@ static ASTNode* parser_parse_typed_function_declaration(Parser* parser,
     parser_advance(parser);
     char** parameters = NULL;
     KrtTokenType* parameter_types = NULL;
+    int* parameter_is_params = NULL;
+    int* parameter_is_array = NULL;
+    ASTNode** parameter_default_values = NULL;
     int parameter_count = 0;
-    if (!parser_parse_parameter_list(parser, &parameters, &parameter_types, &parameter_count)) {
+    if (!parser_parse_parameter_list(parser, &parameters, &parameter_types, &parameter_is_params, &parameter_is_array, &parameter_default_values, &parameter_count)) {
         KRT_FREE(function_name);
         return NULL;
     }
     if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
         KRT_FREE(function_name);
         return NULL;
     }
@@ -2169,22 +3460,26 @@ static ASTNode* parser_parse_typed_function_declaration(Parser* parser,
     if (parser->current_token.type == TOKEN_LEFT_BRACE) {
         body = parser_parse_block(parser);
         if (!body) {
-            parser_free_parameter_list(parameters, parameter_types, parameter_count);
+            parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
             KRT_FREE(function_name);
             return NULL;
         }
     } else if (parser->current_token.type == TOKEN_SEMICOLON) {
         parser_advance(parser);
     } else {
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
         KRT_FREE(function_name);
         return NULL;
     }
     ASTNode* node = parser_create_function_node(parser,
                                                 is_static,
+                                                0,  // is_async
                                                 function_name,
                                                 parameters,
                                                 parameter_types,
+                                                parameter_is_params,
+                                                parameter_is_array,
+                                                parameter_default_values,
                                                 parameter_count,
                                                 body,
                                                 return_type,
@@ -2193,7 +3488,7 @@ static ASTNode* parser_parse_typed_function_declaration(Parser* parser,
         if (body) {
             ast_destroy_node(body);
         }
-        parser_free_parameter_list(parameters, parameter_types, parameter_count);
+        parser_free_parameter_list(parameters, parameter_types, parameter_is_params, parameter_is_array, parameter_default_values, parameter_count);
         KRT_FREE(function_name);
         return NULL;
     }
@@ -2291,8 +3586,42 @@ static ASTNode* parser_parse_for_statement(Parser* parser) {
     if (parser->current_token.type != TOKEN_SEMICOLON) {
         if (parser->current_token.type == TOKEN_VAR || parser->current_token.type == TOKEN_LET) {
             init = parser_parse_variable_declaration(parser);
+        } else if (parser_is_type_keyword(parser->current_token.type)) {
+            // Typed variable declaration in for-init: Type name [= expr]
+            int decl_line = parser->current_token.line;
+            int decl_col = parser->current_token.column;
+            KrtTokenType type_token = parser->current_token.type;
+            parser_advance(parser);
+            if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                return NULL;
+            }
+            char* name = KRT_STRDUP(parser->current_token.value);
+            if (!name) {
+                return NULL;
+            }
+            parser_advance(parser);
+            ASTNode* value = NULL;
+            if (parser->current_token.type == TOKEN_ASSIGN) {
+                parser_advance(parser);
+                value = parser_parse_expression(parser);
+                if (!value) {
+                    KRT_FREE(name);
+                    return NULL;
+                }
+            }
+            init = ast_create_node(AST_VARIABLE_DECLARATION, decl_line, decl_col);
+            if (!init) {
+                KRT_FREE(name);
+                if (value) ast_destroy_node(value);
+                return NULL;
+            }
+            init->data.variable_decl.name = name;
+            init->data.variable_decl.value = value;
+            init->data.variable_decl.type = type_token;
+            init->data.variable_decl.array_size = NULL;
+            init->data.variable_decl.is_array = false;
         } else {
-            
+
             Token next = lexer_peek_token(parser->lexer);
             if (next.type == TOKEN_ASSIGN || 
                 next.type == TOKEN_PLUS_ASSIGN || 
@@ -2414,7 +3743,9 @@ static ASTNode* parser_parse_for_statement(Parser* parser) {
 static ASTNode* parser_parse_block(Parser* parser) {
     int line = parser->current_token.line;
     int col = parser->current_token.column;
+    printf("[DEBUG] parser_parse_block: starting, token=%d\n", parser->current_token.type);
     if (parser->current_token.type != TOKEN_LEFT_BRACE) {
+        printf("[DEBUG] parser_parse_block: no LEFT_BRACE, parsing statement\n");
         return parser_parse_statement(parser);
     }
     parser_advance(parser);
@@ -2422,8 +3753,10 @@ static ASTNode* parser_parse_block(Parser* parser) {
     int statement_count = 0;
     while (parser->current_token.type != TOKEN_RIGHT_BRACE &&
            parser->current_token.type != TOKEN_EOF) {
+        printf("[DEBUG] parser_parse_block: parsing statement, token=%d\n", parser->current_token.type);
         ASTNode* stmt = parser_parse_statement(parser);
         if (!stmt) {
+            printf("[DEBUG] parser_parse_block: statement parsing failed, token=%d\n", parser->current_token.type);
             for (int i = 0; i < statement_count; i++) {
                 ast_destroy_node(statements[i]);
             }
@@ -2444,14 +3777,16 @@ static ASTNode* parser_parse_block(Parser* parser) {
         statement_count++;
     }
     if (parser->current_token.type != TOKEN_RIGHT_BRACE) {
+        printf("[DEBUG] parser_parse_block: expected RIGHT_BRACE, got %d, statement_count=%d\n", parser->current_token.type, statement_count);
         for (int i = 0; i < statement_count; i++) {
             ast_destroy_node(statements[i]);
         }
         KRT_FREE(statements);
         return NULL;
     }
+    printf("[DEBUG] parser_parse_block: found RIGHT_BRACE, statement_count=%d\n", statement_count);
     parser_advance(parser);
-    ASTNode* node = ast_create_node(AST_BLOCK, line, col);
+    ASTNode* node = PARSER_CREATE_NODE(AST_BLOCK, line, col);
     if (!node) {
         for (int i = 0; i < statement_count; i++) {
             ast_destroy_node(statements[i]);
@@ -2468,8 +3803,6 @@ static ASTNode* parser_parse_statement(Parser* parser) {
     if (!parser) {
         return NULL;
     }
-    int line = parser->current_token.line;
-    int col = parser->current_token.column;
     ASTNode* node = NULL;
     switch (parser->current_token.type) {
         case TOKEN_PUBLIC:
@@ -2489,6 +3822,12 @@ static ASTNode* parser_parse_statement(Parser* parser) {
         case TOKEN_RETURN:
             node = parser_parse_return_statement(parser);
             break;
+        case TOKEN_YIELD:
+            node = parser_parse_yield_statement(parser);
+            break;
+        case TOKEN_AWAIT:
+            node = parser_parse_await_expression(parser);
+            break;
         case TOKEN_IF:
             node = parser_parse_if_statement(parser);
             break;
@@ -2506,6 +3845,9 @@ static ASTNode* parser_parse_statement(Parser* parser) {
             break;
         case TOKEN_THROW:
             node = parser_parse_throw_statement(parser);
+            break;
+        case TOKEN_LOCK:
+            node = parser_parse_lock_statement(parser);
             break;
         case TOKEN_UNSAFE:
             node = parser_parse_unsafe_call(parser);
@@ -2528,8 +3870,18 @@ static ASTNode* parser_parse_statement(Parser* parser) {
         case TOKEN_USING:
             node = parser_parse_using_directive(parser);
             break;
+        case TOKEN_MATCH:
+            node = parser_parse_match_expression(parser);
+            break;
+        case TOKEN_FIXED:
+            node = parser_parse_fixed_statement(parser);
+            break;
         case TOKEN_CLASS:
+        case TOKEN_STRUCT:
             node = parser_parse_class_declaration(parser);
+            break;
+        case TOKEN_DELEGATE:
+            node = parser_parse_delegate_declaration(parser);
             break;
         case TOKEN_INT8:
         case TOKEN_INT16:
@@ -2556,6 +3908,55 @@ static ASTNode* parser_parse_statement(Parser* parser) {
         case TOKEN_LEFT_BRACE:
             node = parser_parse_block(parser);
             break;
+        case TOKEN_THIS: {
+            ASTNode* left = parser_parse_postfix_expression(parser);
+            if (!left) {
+                return NULL;
+            }
+            if (parser->current_token.type == TOKEN_ASSIGN ||
+                parser->current_token.type == TOKEN_PLUS_ASSIGN ||
+                parser->current_token.type == TOKEN_MINUS_ASSIGN ||
+                parser->current_token.type == TOKEN_MUL_ASSIGN ||
+                parser->current_token.type == TOKEN_DIV_ASSIGN ||
+                parser->current_token.type == TOKEN_MOD_ASSIGN) {
+                node = parser_parse_assignment_from_left(parser, left);
+            } else {
+                ASTNode* expr = left;
+                while (parser->current_token.type == TOKEN_PLUS ||
+                       parser->current_token.type == TOKEN_MINUS ||
+                       parser->current_token.type == TOKEN_MULTIPLY ||
+                       parser->current_token.type == TOKEN_DIVIDE ||
+                       parser->current_token.type == TOKEN_MODULO ||
+                       parser->current_token.type == TOKEN_EQUAL ||
+                       parser->current_token.type == TOKEN_NOT_EQUAL ||
+                       parser->current_token.type == TOKEN_LESS ||
+                       parser->current_token.type == TOKEN_GREATER ||
+                       parser->current_token.type == TOKEN_LESS_EQUAL ||
+                       parser->current_token.type == TOKEN_GREATER_EQUAL) {
+                    KrtTokenType operator = parser->current_token.type;
+                    int op_line = parser->current_token.line;
+                    int op_col = parser->current_token.column;
+                    parser_advance(parser);
+                    ASTNode* right = parser_parse_postfix_expression(parser);
+                    if (!right) {
+                        ast_destroy_node(expr);
+                        return NULL;
+                    }
+                    ASTNode* new_node = ast_create_node(AST_BINARY_OPERATION, op_line, op_col);
+                    if (!new_node) {
+                        ast_destroy_node(expr);
+                        ast_destroy_node(right);
+                        return NULL;
+                    }
+                    new_node->data.binary_op.left = expr;
+                    new_node->data.binary_op.operator = operator;
+                    new_node->data.binary_op.right = right;
+                    expr = new_node;
+                }
+                node = expr;
+            }
+            break;
+        }
         case TOKEN_IDENTIFIER: {
             if (!parser->is_unsafe_mode && parser->current_token.value[0] == '_' &&
                 strcmp(parser->current_token.value, "__lambda_") != 0) { 
@@ -2649,6 +4050,8 @@ static ASTNode* parser_parse_statement(Parser* parser) {
                         }
                         node = left;
                     }
+                } else if (next_type == TOKEN_IDENTIFIER) {
+                    node = parser_parse_type_declaration(parser);
                 } else {
                     node = parser_parse_expression(parser);
                 }
@@ -2702,7 +4105,7 @@ ASTNode* parser_parse(Parser* parser) {
         statement_count++;
         stmt_index++;
     }
-    ASTNode* program = ast_create_node(AST_PROGRAM, line, col);
+    ASTNode* program = PARSER_CREATE_NODE(AST_PROGRAM, line, col);
     if (!program) {
         for (int i = 0; i < statement_count; i++) {
             ast_destroy_node(statements[i]);
@@ -2884,20 +4287,179 @@ ASTNode* parser_parse_try_statement(Parser* parser) {
     return node;
 }
 
+ASTNode* parser_parse_lock_statement(Parser* parser) {
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+    parser_advance(parser);
+    
+    if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    ASTNode* lock_object = parser_parse_expression(parser);
+    if (!lock_object) {
+        return NULL;
+    }
+    
+    if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+        ast_destroy_node(lock_object);
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    ASTNode* body = parser_parse_statement(parser);
+    if (!body) {
+        ast_destroy_node(lock_object);
+        return NULL;
+    }
+    
+    ASTNode* node = ast_create_node(AST_LOCK_STATEMENT, line, col);
+    if (!node) {
+        ast_destroy_node(lock_object);
+        ast_destroy_node(body);
+        return NULL;
+    }
+    
+    node->data.lock_stmt.lock_object = lock_object;
+    node->data.lock_stmt.body = body;
+    return node;
+}
+
+ASTNode* parser_parse_using_statement(Parser* parser) {
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+    
+    if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    ASTNode* resource_expr = NULL;
+    char* variable_name = NULL;
+    
+    if (parser->current_token.type == TOKEN_VAR ||
+        parser->current_token.type == TOKEN_LET ||
+        parser_is_type_keyword(parser->current_token.type)) {
+        
+        if (parser_is_type_keyword(parser->current_token.type)) {
+            parser_advance(parser);
+        } else {
+            parser_advance(parser);
+        }
+        
+        if (parser->current_token.type != TOKEN_IDENTIFIER) {
+            return NULL;
+        }
+        variable_name = KRT_STRDUP(parser->current_token.value);
+        parser_advance(parser);
+        
+        if (parser->current_token.type != TOKEN_ASSIGN) {
+            KRT_FREE(variable_name);
+            return NULL;
+        }
+        parser_advance(parser);
+        
+        resource_expr = parser_parse_expression(parser);
+        if (!resource_expr) {
+            KRT_FREE(variable_name);
+            return NULL;
+        }
+    } else {
+        resource_expr = parser_parse_expression(parser);
+        if (!resource_expr) {
+            return NULL;
+        }
+    }
+    
+    if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+        if (resource_expr) ast_destroy_node(resource_expr);
+        if (variable_name) KRT_FREE(variable_name);
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    ASTNode* body = parser_parse_statement(parser);
+    if (!body) {
+        if (resource_expr) ast_destroy_node(resource_expr);
+        if (variable_name) KRT_FREE(variable_name);
+        return NULL;
+    }
+    
+    ASTNode* node = ast_create_node(AST_USING_STATEMENT, line, col);
+    if (!node) {
+        if (resource_expr) ast_destroy_node(resource_expr);
+        if (variable_name) KRT_FREE(variable_name);
+        ast_destroy_node(body);
+        return NULL;
+    }
+    
+    node->data.using_stmt.resource = resource_expr;
+    node->data.using_stmt.body = body;
+    return node;
+}
+
+ASTNode* parser_parse_yield_statement(Parser* parser) {
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+    parser_advance(parser);
+    
+    if (parser->current_token.type == TOKEN_BREAK) {
+        parser_advance(parser);
+        if (parser->current_token.type == TOKEN_SEMICOLON) {
+            parser_advance(parser);
+        }
+        ASTNode* node = ast_create_node(AST_YIELD_BREAK, line, col);
+        return node;
+    }
+    
+    if (parser->current_token.type != TOKEN_RETURN) {
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    ASTNode* value = parser_parse_expression(parser);
+    if (!value) {
+        return NULL;
+    }
+    
+    if (parser->current_token.type == TOKEN_SEMICOLON) {
+        parser_advance(parser);
+    }
+    
+    ASTNode* node = ast_create_node(AST_YIELD_RETURN, line, col);
+    if (!node) {
+        ast_destroy_node(value);
+        return NULL;
+    }
+    
+    node->data.yield_return.value = value;
+    return node;
+}
+
 ASTNode* parser_parse_throw_statement(Parser* parser) {
     int line = parser->current_token.line;
     int col = parser->current_token.column;
     parser_advance(parser);
     ASTNode* exception_expr = NULL;
-    if (parser->current_token.type != TOKEN_SEMICOLON && parser->current_token.type != TOKEN_EOF) {
+    int is_rethrow = 0;
+    
+    // Check if it's a rethrow (throw;) or throw with expression
+    if (parser->current_token.type == TOKEN_SEMICOLON) {
+        // throw; - rethrow the current exception
+        is_rethrow = 1;
+        parser_advance(parser);
+    } else if (parser->current_token.type != TOKEN_EOF) {
+        // throw expr; - throw a new exception
         exception_expr = parser_parse_expression(parser);
         if (!exception_expr) {
             return NULL;
         }
+        if (parser->current_token.type == TOKEN_SEMICOLON) {
+            parser_advance(parser);
+        }
     }
-    if (parser->current_token.type == TOKEN_SEMICOLON) {
-        parser_advance(parser);
-    }
+    
     ASTNode* node = ast_create_node(AST_THROW_STATEMENT, line, col);
     if (!node) {
         if (exception_expr) {
@@ -2906,6 +4468,7 @@ ASTNode* parser_parse_throw_statement(Parser* parser) {
         return NULL;
     }
     node->data.throw_stmt.exception_expr = exception_expr;
+    node->data.throw_stmt.is_rethrow = is_rethrow;
     return node;
 }
 
@@ -3082,9 +4645,29 @@ static ASTNode* parser_parse_type_declaration(Parser* parser) {
     int line = parser->current_token.line;
     int col = parser->current_token.column;
     KrtTokenType type_token = parser->current_token.type;
-    const char* type_str = token_type_to_string(type_token);
-    char* type_name = KRT_STRDUP(type_str ? type_str : "UNKNOWN");
+    int is_nullable = 0;
+    int is_array = 0;
+    char* type_name = NULL;
+    if (type_token == TOKEN_IDENTIFIER) {
+        type_name = KRT_STRDUP(parser->current_token.value);
+    } else {
+        const char* type_str = token_type_to_string(type_token);
+        type_name = KRT_STRDUP(type_str ? type_str : "UNKNOWN");
+    }
     parser_advance(parser);
+    if (parser->current_token.type == TOKEN_QUESTION) {
+        is_nullable = 1;
+        parser_advance(parser);
+    }
+    if (parser->current_token.type == TOKEN_LEFT_BRACKET) {
+        Token peek = lexer_peek_token(parser->lexer);
+        if (peek.type == TOKEN_RIGHT_BRACKET) {
+            is_array = 1;
+            parser_advance(parser);
+            parser_advance(parser);
+        }
+        token_free(&peek);
+    }
     if (parser->current_token.type != TOKEN_IDENTIFIER) {
         KRT_FREE(type_name);
         return NULL;
@@ -3130,8 +4713,9 @@ static ASTNode* parser_parse_type_declaration(Parser* parser) {
     node->data.variable_decl.value = value;
     node->data.variable_decl.type = type_token;
     node->data.variable_decl.array_size = NULL;
-    node->data.variable_decl.is_array = false;
-    node->data.variable_decl.template_instantiation_type = NULL;
+    node->data.variable_decl.is_array = is_array;
+    node->data.variable_decl.template_instantiation_type = (type_token == TOKEN_IDENTIFIER && type_name) ? KRT_STRDUP(type_name) : NULL;
+    node->data.variable_decl.is_nullable = is_nullable;
     KRT_FREE(type_name);
     
     if (parser->current_token.type == TOKEN_SEMICOLON) {
@@ -3363,9 +4947,7 @@ ASTNode* parser_parse_foreach_statement(Parser* parser) {
     }
     parser_advance(parser);
     
-    bool has_var = false;
     if (parser->current_token.type == TOKEN_VAR || parser->current_token.type == TOKEN_LET) {
-        has_var = true;
         parser_advance(parser);
     }
     
@@ -3478,6 +5060,7 @@ static ASTNode* parser_parse_property_declaration(Parser* parser, KrtTokenType t
                     return NULL;
                 }
                 getter->data.property_getter.body = NULL;
+                getter->data.property_getter.is_auto = 1;
             }
         } else if (parser->current_token.type == TOKEN_SET) {
             parser_advance(parser);
@@ -3532,6 +5115,7 @@ static ASTNode* parser_parse_property_declaration(Parser* parser, KrtTokenType t
                 }
                 setter->data.property_setter.value_param_name = KRT_STRDUP("value");
                 setter->data.property_setter.body = NULL;
+                setter->data.property_setter.is_auto = 1;
             }
         } else {
             
@@ -3577,6 +5161,24 @@ static ASTNode* parser_parse_property_declaration(Parser* parser, KrtTokenType t
     node->data.property_decl.initial_value = initial_value;
     node->data.property_decl.attributes = attributes;
     node->data.property_decl.attribute_count = attribute_count;
+    
+    int is_auto = (getter && getter->data.property_getter.is_auto) ||
+                  (setter && setter->data.property_setter.is_auto);
+    node->data.property_decl.is_auto_property = is_auto;
+    
+    if (is_auto && name) {
+        size_t field_name_len = strlen(name) + 2;
+        char* field_name = (char*)KRT_MALLOC(field_name_len);
+        if (field_name) {
+            field_name[0] = '_';
+            strcpy(field_name + 1, name);
+            node->data.property_decl.backing_field_name = field_name;
+        } else {
+            node->data.property_decl.backing_field_name = NULL;
+        }
+    } else {
+        node->data.property_decl.backing_field_name = NULL;
+    }
     
     return node;
 }
@@ -3705,136 +5307,6 @@ static ASTNode* parser_parse_lambda_expression(Parser* parser, char** parameters
         KRT_FREE(node);
         return NULL;
     }
-    
-    return node;
-}
-static ASTNode* parser_parse_attribute(Parser* parser) {
-    if (!parser || parser->current_token.type != TOKEN_LEFT_BRACKET) return NULL;
-    
-    int line = parser->current_token.line;
-    int col = parser->current_token.column;
-    
-    parser_advance(parser);
-    
-    if (parser->current_token.type != TOKEN_IDENTIFIER) {
-        return NULL;
-    }
-    
-    char* name = KRT_STRDUP(parser->current_token.value);
-    if (!name) return NULL;
-    parser_advance(parser);
-    
-    ASTNode** arguments = NULL;
-    int argument_count = 0;
-    int capacity = 0;
-    
-    if (parser->current_token.type == TOKEN_LEFT_PAREN) {
-        parser_advance(parser);
-        
-        capacity = PARSER_PARAMETER_CAPACITY_INIT;
-        arguments = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
-        if (!arguments) {
-            KRT_FREE(name);
-            return NULL;
-        }
-        
-        while (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-            ASTNode* arg = parser_parse_expression(parser);
-            if (!arg) {
-                PARSER_FREE_STRING_ARRAY(arguments, argument_count);
-                KRT_FREE(name);
-                return NULL;
-            }
-            
-            if (argument_count >= capacity) {
-                capacity *= 2;
-                ASTNode** new_args = (ASTNode**)KRT_REALLOC(arguments, capacity * sizeof(ASTNode*));
-                if (!new_args) {
-                    ast_destroy_node(arg);
-                    PARSER_FREE_STRING_ARRAY(arguments, argument_count);
-                    KRT_FREE(name);
-                    return NULL;
-                }
-                arguments = new_args;
-            }
-            
-            arguments[argument_count++] = arg;
-            
-            if (parser->current_token.type == TOKEN_COMMA) {
-                parser_advance(parser);
-            } else if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
-                ast_destroy_node(arg);
-                PARSER_FREE_STRING_ARRAY(arguments, argument_count);
-                KRT_FREE(name);
-                return NULL;
-            }
-        }
-        
-        parser_advance(parser); 
-    }
-    
-    if (parser->current_token.type != TOKEN_RIGHT_BRACKET) {
-        PARSER_FREE_STRING_ARRAY(arguments, argument_count);
-        KRT_FREE(name);
-        return NULL;
-    }
-    parser_advance(parser);
-    
-    ASTNode* node = ast_create_node(AST_ATTRIBUTE, line, col);
-    if (!node) {
-        PARSER_FREE_STRING_ARRAY(arguments, argument_count);
-        KRT_FREE(name);
-        return NULL;
-    }
-    
-    node->data.attribute.name = name;
-    node->data.attribute.arguments = arguments;
-    node->data.attribute.argument_count = argument_count;
-    node->data.attribute.named_arguments = NULL;
-    
-    return node;
-}
-static ASTNode* parser_parse_attributes(Parser* parser) {
-    if (!parser || parser->current_token.type != TOKEN_LEFT_BRACKET) return NULL;
-    
-    int line = parser->current_token.line;
-    int col = parser->current_token.column;
-    
-    int capacity = PARSER_ATTRIBUTE_CAPACITY_INIT;
-    int count = 0;
-    ASTNode** attributes = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
-    if (!attributes) return NULL;
-    
-    while (parser->current_token.type == TOKEN_LEFT_BRACKET) {
-        ASTNode* attr = parser_parse_attribute(parser);
-        if (!attr) {
-            PARSER_FREE_STRING_ARRAY(attributes, count);
-            return NULL;
-        }
-        
-        if (count >= capacity) {
-            capacity *= 2;
-            ASTNode** new_attrs = (ASTNode**)KRT_REALLOC(attributes, capacity * sizeof(ASTNode*));
-            if (!new_attrs) {
-                ast_destroy_node(attr);
-                PARSER_FREE_STRING_ARRAY(attributes, count);
-                return NULL;
-            }
-            attributes = new_attrs;
-        }
-        
-        attributes[count++] = attr;
-    }
-    
-    ASTNode* node = ast_create_node(AST_ATTRIBUTE_LIST, line, col);
-    if (!node) {
-        PARSER_FREE_STRING_ARRAY(attributes, count);
-        return NULL;
-    }
-    
-    node->data.attribute_list.attributes = attributes;
-    node->data.attribute_list.attribute_count = count;
-    node->data.attribute_list.target = NULL;
     
     return node;
 }
@@ -3982,6 +5454,347 @@ static ASTNode* parser_parse_linq_query(Parser* parser) {
             }
             
             clauses[clause_count++] = orderby_clause;
+        } else if (parser->current_token.type == TOKEN_JOIN) {
+            parser_advance(parser);
+            
+            if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            char* join_var_name = KRT_STRDUP(parser->current_token.value);
+            if (!join_var_name) {
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            if (parser->current_token.type != TOKEN_IN) {
+                KRT_FREE(join_var_name);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode* join_source = parser_parse_expression(parser);
+            if (!join_source) {
+                KRT_FREE(join_var_name);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            if (parser->current_token.type != TOKEN_ON) {
+                KRT_FREE(join_var_name);
+                ast_destroy_node(join_source);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode* left_key = parser_parse_expression(parser);
+            if (!left_key) {
+                KRT_FREE(join_var_name);
+                ast_destroy_node(join_source);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            if (parser->current_token.type != TOKEN_EQUALS) {
+                ast_destroy_node(left_key);
+                KRT_FREE(join_var_name);
+                ast_destroy_node(join_source);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode* right_key = parser_parse_expression(parser);
+            if (!right_key) {
+                ast_destroy_node(left_key);
+                KRT_FREE(join_var_name);
+                ast_destroy_node(join_source);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            char* into_var_name = NULL;
+            if (parser->current_token.type == TOKEN_INTO) {
+                parser_advance(parser);
+                if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                    ast_destroy_node(right_key);
+                    ast_destroy_node(left_key);
+                    KRT_FREE(join_var_name);
+                    ast_destroy_node(join_source);
+                    for (int i = 0; i < clause_count; i++) {
+                        ast_destroy_node(clauses[i]);
+                    }
+                    KRT_FREE(clauses);
+                    ast_destroy_node(from_clause);
+                    return NULL;
+                }
+                into_var_name = KRT_STRDUP(parser->current_token.value);
+                if (!into_var_name) {
+                    ast_destroy_node(right_key);
+                    ast_destroy_node(left_key);
+                    KRT_FREE(join_var_name);
+                    ast_destroy_node(join_source);
+                    for (int i = 0; i < clause_count; i++) {
+                        ast_destroy_node(clauses[i]);
+                    }
+                    KRT_FREE(clauses);
+                    ast_destroy_node(from_clause);
+                    return NULL;
+                }
+                parser_advance(parser);
+            }
+            
+            ASTNode* join_clause = ast_create_node(AST_LINQ_JOIN, line, col);
+            if (!join_clause) {
+                if (into_var_name) KRT_FREE(into_var_name);
+                ast_destroy_node(right_key);
+                ast_destroy_node(left_key);
+                KRT_FREE(join_var_name);
+                ast_destroy_node(join_source);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            join_clause->data.linq_join.var_name = NULL;
+            join_clause->data.linq_join.source = NULL;
+            join_clause->data.linq_join.join_var_name = join_var_name;
+            join_clause->data.linq_join.join_source = join_source;
+            join_clause->data.linq_join.left_key = left_key;
+            join_clause->data.linq_join.right_key = right_key;
+            join_clause->data.linq_join.into_var_name = into_var_name;
+            
+            if (clause_count >= capacity) {
+                capacity *= 2;
+                ASTNode** new_clauses = (ASTNode**)KRT_REALLOC(clauses, capacity * sizeof(ASTNode*));
+                if (!new_clauses) {
+                    ast_destroy_node(join_clause);
+                    for (int i = 0; i < clause_count; i++) {
+                        ast_destroy_node(clauses[i]);
+                    }
+                    KRT_FREE(clauses);
+                    ast_destroy_node(from_clause);
+                    return NULL;
+                }
+                clauses = new_clauses;
+            }
+            
+            clauses[clause_count++] = join_clause;
+        } else if (parser->current_token.type == TOKEN_LET) {
+            parser_advance(parser);
+            
+            if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            char* let_var_name = KRT_STRDUP(parser->current_token.value);
+            if (!let_var_name) {
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            if (parser->current_token.type != TOKEN_ASSIGN) {
+                KRT_FREE(let_var_name);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode* let_expr = parser_parse_expression(parser);
+            if (!let_expr) {
+                KRT_FREE(let_var_name);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            ASTNode* let_clause = ast_create_node(AST_LINQ_LET, line, col);
+            if (!let_clause) {
+                ast_destroy_node(let_expr);
+                KRT_FREE(let_var_name);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            let_clause->data.linq_let.var_name = let_var_name;
+            let_clause->data.linq_let.expression = let_expr;
+            
+            if (clause_count >= capacity) {
+                capacity *= 2;
+                ASTNode** new_clauses = (ASTNode**)KRT_REALLOC(clauses, capacity * sizeof(ASTNode*));
+                if (!new_clauses) {
+                    ast_destroy_node(let_clause);
+                    for (int i = 0; i < clause_count; i++) {
+                        ast_destroy_node(clauses[i]);
+                    }
+                    KRT_FREE(clauses);
+                    ast_destroy_node(from_clause);
+                    return NULL;
+                }
+                clauses = new_clauses;
+            }
+            
+            clauses[clause_count++] = let_clause;
+        } else if (parser->current_token.type == TOKEN_GROUP) {
+            parser_advance(parser);
+            
+            ASTNode* element_expr = parser_parse_expression(parser);
+            if (!element_expr) {
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            if (parser->current_token.type != TOKEN_BY) {
+                ast_destroy_node(element_expr);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            parser_advance(parser);
+            
+            ASTNode* key_expr = parser_parse_expression(parser);
+            if (!key_expr) {
+                ast_destroy_node(element_expr);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            char* into_var_name = NULL;
+            if (parser->current_token.type == TOKEN_INTO) {
+                parser_advance(parser);
+                if (parser->current_token.type != TOKEN_IDENTIFIER) {
+                    ast_destroy_node(key_expr);
+                    ast_destroy_node(element_expr);
+                    for (int i = 0; i < clause_count; i++) {
+                        ast_destroy_node(clauses[i]);
+                    }
+                    KRT_FREE(clauses);
+                    ast_destroy_node(from_clause);
+                    return NULL;
+                }
+                into_var_name = KRT_STRDUP(parser->current_token.value);
+                if (!into_var_name) {
+                    ast_destroy_node(key_expr);
+                    ast_destroy_node(element_expr);
+                    for (int i = 0; i < clause_count; i++) {
+                        ast_destroy_node(clauses[i]);
+                    }
+                    KRT_FREE(clauses);
+                    ast_destroy_node(from_clause);
+                    return NULL;
+                }
+                parser_advance(parser);
+            }
+            
+            ASTNode* group_clause = ast_create_node(AST_LINQ_GROUP, line, col);
+            if (!group_clause) {
+                if (into_var_name) KRT_FREE(into_var_name);
+                ast_destroy_node(key_expr);
+                ast_destroy_node(element_expr);
+                for (int i = 0; i < clause_count; i++) {
+                    ast_destroy_node(clauses[i]);
+                }
+                KRT_FREE(clauses);
+                ast_destroy_node(from_clause);
+                return NULL;
+            }
+            
+            group_clause->data.linq_group.key_expression = key_expr;
+            group_clause->data.linq_group.element_expression = element_expr;
+            group_clause->data.linq_group.into_var_name = into_var_name;
+            
+            if (clause_count >= capacity) {
+                capacity *= 2;
+                ASTNode** new_clauses = (ASTNode**)KRT_REALLOC(clauses, capacity * sizeof(ASTNode*));
+                if (!new_clauses) {
+                    ast_destroy_node(group_clause);
+                    for (int i = 0; i < clause_count; i++) {
+                        ast_destroy_node(clauses[i]);
+                    }
+                    KRT_FREE(clauses);
+                    ast_destroy_node(from_clause);
+                    return NULL;
+                }
+                clauses = new_clauses;
+            }
+            
+            clauses[clause_count++] = group_clause;
+            
+            if (into_var_name) {
+                continue;
+            }
+            break;
         } else if (parser->current_token.type == TOKEN_SELECT) {
             parser_advance(parser);
             ASTNode* expr = parser_parse_expression(parser);
@@ -4030,5 +5843,490 @@ static ASTNode* parser_parse_linq_query(Parser* parser) {
     node->data.linq_query.clause_count = clause_count;
     node->data.linq_query.select_clause = select_clause;
     
+    return node;
+}
+
+// Pattern matching support
+static ASTNode* parser_parse_pattern(Parser* parser);
+
+static ASTNode* parser_parse_match_expression(Parser* parser) {
+    if (!parser || parser->current_token.type != TOKEN_MATCH) return NULL;
+    
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+    
+    parser_advance(parser);
+    
+    ASTNode* expr = parser_parse_expression(parser);
+    if (!expr) return NULL;
+    
+    if (parser->current_token.type != TOKEN_WITH) {
+        ast_destroy_node(expr);
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    int capacity = 8;
+    ASTNode** cases = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
+    if (!cases) {
+        ast_destroy_node(expr);
+        return NULL;
+    }
+    int case_count = 0;
+    
+    while (parser->current_token.type == TOKEN_PIPE) {
+        parser_advance(parser);
+        
+        ASTNode* pattern = parser_parse_pattern(parser);
+        if (!pattern) {
+            for (int i = 0; i < case_count; i++) ast_destroy_node(cases[i]);
+            KRT_FREE(cases);
+            ast_destroy_node(expr);
+            return NULL;
+        }
+        
+        ASTNode* when_clause = NULL;
+        if (parser->current_token.type == TOKEN_WHEN) {
+            parser_advance(parser);
+            when_clause = parser_parse_expression(parser);
+            if (!when_clause) {
+                ast_destroy_node(pattern);
+                for (int i = 0; i < case_count; i++) ast_destroy_node(cases[i]);
+                KRT_FREE(cases);
+                ast_destroy_node(expr);
+                return NULL;
+            }
+        }
+        
+        if (parser->current_token.type != TOKEN_ARROW) {
+            if (when_clause) ast_destroy_node(when_clause);
+            ast_destroy_node(pattern);
+            for (int i = 0; i < case_count; i++) ast_destroy_node(cases[i]);
+            KRT_FREE(cases);
+            ast_destroy_node(expr);
+            return NULL;
+        }
+        parser_advance(parser);
+        
+        ASTNode* body = parser_parse_expression(parser);
+        if (!body) {
+            if (when_clause) ast_destroy_node(when_clause);
+            ast_destroy_node(pattern);
+            for (int i = 0; i < case_count; i++) ast_destroy_node(cases[i]);
+            KRT_FREE(cases);
+            ast_destroy_node(expr);
+            return NULL;
+        }
+        
+        ASTNode* case_node = ast_create_node(AST_PATTERN_CASE, line, col);
+        if (!case_node) {
+            ast_destroy_node(body);
+            if (when_clause) ast_destroy_node(when_clause);
+            ast_destroy_node(pattern);
+            for (int i = 0; i < case_count; i++) ast_destroy_node(cases[i]);
+            KRT_FREE(cases);
+            ast_destroy_node(expr);
+            return NULL;
+        }
+        
+        case_node->data.pattern_case.pattern = pattern;
+        case_node->data.pattern_case.when_clause = when_clause;
+        case_node->data.pattern_case.body = body;
+        
+        if (case_count >= capacity) {
+            capacity *= 2;
+            ASTNode** new_cases = (ASTNode**)KRT_REALLOC(cases, capacity * sizeof(ASTNode*));
+            if (!new_cases) {
+                ast_destroy_node(case_node);
+                for (int i = 0; i < case_count; i++) ast_destroy_node(cases[i]);
+                KRT_FREE(cases);
+                ast_destroy_node(expr);
+                return NULL;
+            }
+            cases = new_cases;
+        }
+        cases[case_count++] = case_node;
+    }
+    
+    ASTNode* node = ast_create_node(AST_MATCH_EXPRESSION, line, col);
+    if (!node) {
+        for (int i = 0; i < case_count; i++) ast_destroy_node(cases[i]);
+        KRT_FREE(cases);
+        ast_destroy_node(expr);
+        return NULL;
+    }
+    
+    node->data.match_expr.expression = expr;
+    node->data.match_expr.cases = cases;
+    node->data.match_expr.case_count = case_count;
+    
+    return node;
+}
+
+static ASTNode* parser_parse_pattern(Parser* parser) {
+    if (!parser) return NULL;
+    
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+    
+    if (parser->current_token.type == TOKEN_UNDERSCORE) {
+        parser_advance(parser);
+        return ast_create_node(AST_PATTERN_WILDCARD, line, col);
+    }
+    
+    if (parser->current_token.type == TOKEN_NUMBER ||
+        parser->current_token.type == TOKEN_STRING ||
+        parser->current_token.type == TOKEN_TRUE ||
+        parser->current_token.type == TOKEN_FALSE ||
+        parser->current_token.type == TOKEN_NULL) {
+        ASTNode* value = parser_parse_primary(parser);
+        if (!value) return NULL;
+        
+        ASTNode* node = ast_create_node(AST_PATTERN_LITERAL, line, col);
+        if (!node) {
+            ast_destroy_node(value);
+            return NULL;
+        }
+        node->data.pattern_literal.value = value;
+        return node;
+    }
+    
+    if (parser->current_token.type == TOKEN_LEFT_PAREN) {
+        parser_advance(parser);
+        
+        int capacity = 4;
+        ASTNode** elements = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
+        if (!elements) return NULL;
+        int element_count = 0;
+        
+        while (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+            ASTNode* elem = parser_parse_pattern(parser);
+            if (!elem) {
+                for (int i = 0; i < element_count; i++) ast_destroy_node(elements[i]);
+                KRT_FREE(elements);
+                return NULL;
+            }
+            
+            if (element_count >= capacity) {
+                capacity *= 2;
+                ASTNode** new_elements = (ASTNode**)KRT_REALLOC(elements, capacity * sizeof(ASTNode*));
+                if (!new_elements) {
+                    ast_destroy_node(elem);
+                    for (int i = 0; i < element_count; i++) ast_destroy_node(elements[i]);
+                    KRT_FREE(elements);
+                    return NULL;
+                }
+                elements = new_elements;
+            }
+            elements[element_count++] = elem;
+            
+            if (parser->current_token.type == TOKEN_COMMA) {
+                parser_advance(parser);
+            } else if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+                for (int i = 0; i < element_count; i++) ast_destroy_node(elements[i]);
+                KRT_FREE(elements);
+                return NULL;
+            }
+        }
+        
+        parser_advance(parser);
+        
+        ASTNode* node = ast_create_node(AST_PATTERN_TUPLE, line, col);
+        if (!node) {
+            for (int i = 0; i < element_count; i++) ast_destroy_node(elements[i]);
+            KRT_FREE(elements);
+            return NULL;
+        }
+        node->data.pattern_tuple.elements = elements;
+        node->data.pattern_tuple.element_count = element_count;
+        return node;
+    }
+    
+    if (parser->current_token.type == TOKEN_IDENTIFIER) {
+        char* name = KRT_STRDUP(parser->current_token.value);
+        if (!name) return NULL;
+        parser_advance(parser);
+        
+        ASTNode* node = ast_create_node(AST_PATTERN_VARIABLE, line, col);
+        if (!node) {
+            KRT_FREE(name);
+            return NULL;
+        }
+        node->data.pattern_variable.name = name;
+        return node;
+    }
+    
+    return NULL;
+}
+
+static ASTNode* parser_parse_fixed_statement(Parser* parser) {
+    if (!parser || parser->current_token.type != TOKEN_FIXED) return NULL;
+    
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+    
+    parser_advance(parser); // consume 'fixed'
+    
+    if (parser->current_token.type != TOKEN_LEFT_PAREN) {
+        return NULL;
+    }
+    parser_advance(parser); // consume '('
+    
+    // Parse variable declaration: ptr = &obj
+    if (parser->current_token.type != TOKEN_IDENTIFIER) {
+        return NULL;
+    }
+    
+    char* var_name = KRT_STRDUP(parser->current_token.value);
+    if (!var_name) {
+        return NULL;
+    }
+    parser_advance(parser);
+    
+    if (parser->current_token.type != TOKEN_ASSIGN) {
+        KRT_FREE(var_name);
+        return NULL;
+    }
+    parser_advance(parser); // consume '='
+    
+    ASTNode* expr = parser_parse_expression(parser);
+    if (!expr) {
+        KRT_FREE(var_name);
+        return NULL;
+    }
+    
+    if (parser->current_token.type != TOKEN_RIGHT_PAREN) {
+        ast_destroy_node(expr);
+        KRT_FREE(var_name);
+        return NULL;
+    }
+    parser_advance(parser); // consume ')'
+    
+    // Parse body
+    ASTNode* body = parser_parse_statement(parser);
+    if (!body) {
+        ast_destroy_node(expr);
+        KRT_FREE(var_name);
+        return NULL;
+    }
+    
+    ASTNode* node = ast_create_node(AST_FIXED_STATEMENT, line, col);
+    if (!node) {
+        ast_destroy_node(body);
+        ast_destroy_node(expr);
+        KRT_FREE(var_name);
+        return NULL;
+    }
+
+    node->data.fixed_statement.variable_name = var_name;
+    node->data.fixed_statement.expression = expr;
+    node->data.fixed_statement.body = body;
+
+    return node;
+}
+
+static ASTNode* parser_parse_generic_constraints(Parser* parser) {
+    if (!parser || parser->current_token.type != TOKEN_WHERE) return NULL;
+
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+
+    ASTNode* constraint_list = ast_create_node(AST_GENERIC_CONSTRAINT, line, col);
+    if (!constraint_list) return NULL;
+
+    int capacity = 4;
+    ASTNode** constraints = (ASTNode**)KRT_MALLOC(capacity * sizeof(ASTNode*));
+    if (!constraints) {
+        ast_destroy_node(constraint_list);
+        return NULL;
+    }
+
+    int count = 0;
+
+    while (parser->current_token.type == TOKEN_WHERE) {
+        parser_advance(parser); // consume 'where'
+
+        // Expect type parameter name
+        if (parser->current_token.type != TOKEN_IDENTIFIER) {
+            for (int i = 0; i < count; i++) {
+                ast_destroy_node(constraints[i]);
+            }
+            KRT_FREE(constraints);
+            ast_destroy_node(constraint_list);
+            return NULL;
+        }
+
+        char* param_name = KRT_STRDUP(parser->current_token.value);
+        parser_advance(parser);
+
+        // Expect ':'
+        if (parser->current_token.type != TOKEN_COLON) {
+            KRT_FREE(param_name);
+            for (int i = 0; i < count; i++) {
+                ast_destroy_node(constraints[i]);
+            }
+            KRT_FREE(constraints);
+            ast_destroy_node(constraint_list);
+            return NULL;
+        }
+        parser_advance(parser); // consume ':'
+
+        // Parse constraint type
+        char* constraint_type = NULL;
+        ASTNode* interface_constraint = NULL;
+
+        if (parser->current_token.type == TOKEN_CLASS) {
+            constraint_type = KRT_STRDUP("class");
+            parser_advance(parser);
+        } else if (parser->current_token.type == TOKEN_STRUCT) {
+            constraint_type = KRT_STRDUP("struct");
+            parser_advance(parser);
+        } else if (parser->current_token.type == TOKEN_NEW) {
+            // new() constraint
+            constraint_type = KRT_STRDUP("new");
+            parser_advance(parser);
+            if (parser->current_token.type == TOKEN_LEFT_PAREN) {
+                parser_advance(parser); // consume '('
+                if (parser->current_token.type == TOKEN_RIGHT_PAREN) {
+                    parser_advance(parser); // consume ')'
+                }
+            }
+        } else if (parser->current_token.type == TOKEN_IDENTIFIER) {
+            // Interface or base class constraint
+            constraint_type = KRT_STRDUP("interface");
+            interface_constraint = ast_create_node(AST_IDENTIFIER, parser->current_token.line, parser->current_token.column);
+            if (interface_constraint) {
+                interface_constraint->data.identifier_name = KRT_STRDUP(parser->current_token.value);
+            }
+            parser_advance(parser);
+        } else {
+            KRT_FREE(param_name);
+            for (int i = 0; i < count; i++) {
+                ast_destroy_node(constraints[i]);
+            }
+            KRT_FREE(constraints);
+            ast_destroy_node(constraint_list);
+            return NULL;
+        }
+
+        if (count >= capacity) {
+            capacity *= 2;
+            ASTNode** new_constraints = (ASTNode**)KRT_REALLOC(constraints, capacity * sizeof(ASTNode*));
+            if (!new_constraints) {
+                KRT_FREE(param_name);
+                KRT_FREE(constraint_type);
+                if (interface_constraint) ast_destroy_node(interface_constraint);
+                for (int i = 0; i < count; i++) {
+                    ast_destroy_node(constraints[i]);
+                }
+                KRT_FREE(constraints);
+                ast_destroy_node(constraint_list);
+                return NULL;
+            }
+            constraints = new_constraints;
+        }
+
+        ASTNode* constraint = ast_create_node(AST_GENERIC_CONSTRAINT, parser->current_token.line, parser->current_token.column);
+        if (!constraint) {
+            KRT_FREE(param_name);
+            KRT_FREE(constraint_type);
+            if (interface_constraint) ast_destroy_node(interface_constraint);
+            for (int i = 0; i < count; i++) {
+                ast_destroy_node(constraints[i]);
+            }
+            KRT_FREE(constraints);
+            ast_destroy_node(constraint_list);
+            return NULL;
+        }
+
+        constraint->data.generic_constraint.param_name = param_name;
+        constraint->data.generic_constraint.constraint_type = constraint_type;
+        constraint->data.generic_constraint.interface_constraint = interface_constraint;
+
+        constraints[count++] = constraint;
+
+        // Check for more where clauses
+        if (parser->current_token.type != TOKEN_WHERE) {
+            break;
+        }
+    }
+
+    // Store constraints in the list node
+    // Note: This is a simplified approach - in a real implementation,
+    // you might want to create a proper list node type
+    constraint_list->data.generic_constraint.param_name = NULL;
+    constraint_list->data.generic_constraint.constraint_type = NULL;
+    constraint_list->data.generic_constraint.interface_constraint = (ASTNode*)constraints;
+
+    return constraint_list;
+}
+
+static ASTNode* parser_parse_stackalloc_expression(Parser* parser) {
+    if (!parser || parser->current_token.type != TOKEN_STACKALLOC) return NULL;
+
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+
+    parser_advance(parser); // consume 'stackalloc'
+
+    // Parse element type
+    if (!parser_is_type_keyword(parser->current_token.type)) {
+        return NULL;
+    }
+    KrtTokenType element_type = parser->current_token.type;
+    parser_advance(parser);
+
+    // Expect '['
+    if (parser->current_token.type != TOKEN_LEFT_BRACKET) {
+        return NULL;
+    }
+    parser_advance(parser); // consume '['
+
+    // Parse size expression
+    ASTNode* size_expr = parser_parse_expression(parser);
+    if (!size_expr) {
+        return NULL;
+    }
+
+    // Expect ']'
+    if (parser->current_token.type != TOKEN_RIGHT_BRACKET) {
+        ast_destroy_node(size_expr);
+        return NULL;
+    }
+    parser_advance(parser); // consume ']'
+
+    ASTNode* node = ast_create_node(AST_STACKALLOC_EXPRESSION, line, col);
+    if (!node) {
+        ast_destroy_node(size_expr);
+        return NULL;
+    }
+
+    node->data.stackalloc_expr.type_token = element_type;
+    node->data.stackalloc_expr.count_expr = size_expr;
+
+    return node;
+}
+
+static ASTNode* parser_parse_await_expression(Parser* parser) {
+    if (!parser || parser->current_token.type != TOKEN_AWAIT) return NULL;
+
+    int line = parser->current_token.line;
+    int col = parser->current_token.column;
+
+    parser_advance(parser); // consume 'await'
+
+    ASTNode* expr = parser_parse_expression(parser);
+    if (!expr) {
+        return NULL;
+    }
+
+    ASTNode* node = ast_create_node(AST_AWAIT_EXPRESSION, line, col);
+    if (!node) {
+        ast_destroy_node(expr);
+        return NULL;
+    }
+
+    node->data.await_expr.expression = expr;
+
     return node;
 }
