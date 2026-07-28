@@ -206,7 +206,7 @@ size_t KrtCalculateDynamicStackSize(const char* ir_code) {
     return total_size;
 }
 
-size_t KrtPredictStackUsage(const char* function_signature,
+size_t KrtPredictStackUsage(const char* function_signature __attribute__((unused)),
                              size_t param_count, size_t local_var_count) {
 
     size_t base_size = 16;

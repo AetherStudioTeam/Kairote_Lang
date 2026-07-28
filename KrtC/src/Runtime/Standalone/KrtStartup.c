@@ -1,6 +1,10 @@
 
 #include "KrtStandalone.h"
 
+#ifndef _WIN32
+#include <sys/syscall.h>
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 
@@ -18,8 +22,10 @@ char** KrtGetargv(void) {
     return g_argv;
 }
 
+static void parse_cmdline(void) __attribute__((unused));
+
 static void parse_cmdline(void) {
-    
+
     const char* cmdline = GetCommandLineA();
     if (!cmdline) {
         g_argc = 0;
@@ -103,7 +109,7 @@ char** KrtGetargv(void) {
 
 void _start(void) {
     
-    register long* rsp asm("rsp");
+    register long* rsp __asm__("rsp");
     
     g_argc = (int)rsp[0];
     g_argv = (char**)(rsp + 1);

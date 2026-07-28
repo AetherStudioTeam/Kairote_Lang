@@ -4,9 +4,9 @@ extern void* memset(void* s, int c, size_t n);
 extern int strcmp(const char* s1, const char* s2);
 
 #include "ConfigManager.h"
-#include "../../Core/Utils/logger.h"
-#include "../../Core/Utils/path.h"
-#include "Compiler/Platform/PlatformAbstraction.h"
+#include "../../Core/Utils/Logger.h"
+#include "../../Core/Utils/Path.h"
+#include "../Platform/PlatformAbstraction.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -35,10 +35,6 @@ static const char* g_win_libraries[] = {
     NULL
 };
 
-static const char* g_linux_object_files[] = {
-    NULL
-};
-
 static const char* g_linux_libraries[] = {
     NULL
 };
@@ -58,7 +54,7 @@ static const KrtLinkerConfig g_linker_configs[] = {
         NULL, 0,
         NULL, 0,
         g_linux_libraries, sizeof(g_linux_libraries) / sizeof(char*),
-        "main", NULL, NULL
+        "_start", NULL, NULL
     }
 };
 

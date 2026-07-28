@@ -3,6 +3,10 @@
 #include "../../../Core/Utils/KrtCommon.h"
 #include <string.h>
 
+const char* g_allocable_regs[X86_NUM_ALLOCABLE_REGS] = {
+    "r10", "r11"
+};
+
 void liveness_init_set(LiveSet* set) {
     memset(set->bits, 0, sizeof(set->bits));
 }

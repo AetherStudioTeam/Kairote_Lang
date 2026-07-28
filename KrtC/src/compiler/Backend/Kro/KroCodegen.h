@@ -16,10 +16,4 @@ typedef struct {
 
 void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule* module);
 
-static void KroGenerateFunction(KROCodegenContext* ctx, KrtIRFunction* func, KrtIRModule* module);
-
-static void KroGenerateBlock(KROCodegenContext* ctx, KrtIRBasicBlock* block);
-
-static void KroGenerateInstruction(KROCodegenContext* ctx, KrtIRInst* inst);
-
 #endif 

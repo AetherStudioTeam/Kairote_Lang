@@ -196,64 +196,6 @@ static void write_dos_header(uint8_t* data) {
     memcpy(data + sizeof(PE_DOS_HEADER), dos_stub, sizeof(dos_stub));
 }
 
-static void write_pe_headers(uint8_t* data, size_t section_count, uint32_t image_size,
-                             uint32_t entry_point_rva, uint32_t section_alignment,
-                             uint32_t file_alignment, uint32_t reloc_rva, uint32_t reloc_size) {
-    uint32_t pe_offset = 0x80;
-    
-    *(uint32_t*)(data + pe_offset) = PE_SIGNATURE;
-    
-    PE_COFF_HEADER* coff = (PE_COFF_HEADER*)(data + pe_offset + 4);
-    coff->Machine = PE_MACHINE_AMD64;
-    coff->NumberOfSections = (uint16_t)section_count;
-    coff->TimeDateStamp = 0;
-    coff->PointerToSymbolTable = 0;
-    coff->NumberOfSymbols = 0;
-    coff->SizeOfOptionalHeader = sizeof(PE_OPTIONAL_HEADER_64);
-    coff->Characteristics = PE_CHAR_EXECUTABLE_IMAGE | PE_CHAR_LARGE_ADDRESS_AWARE | PE_CHAR_DEBUG_STRIPPED;
-    
-    PE_OPTIONAL_HEADER_64* opt = (PE_OPTIONAL_HEADER_64*)(data + pe_offset + 4 + sizeof(PE_COFF_HEADER));
-    opt->Magic = PE_OPT_HDR_MAGIC_PE32_PLUS;
-    opt->MajorLinkerVersion = 1;
-    opt->MinorLinkerVersion = 0;
-    opt->SizeOfCode = 0;
-    opt->SizeOfInitializedData = 0;
-    opt->SizeOfUninitializedData = 0;
-    opt->AddressOfEntryPoint = entry_point_rva;
-    opt->BaseOfCode = section_alignment;
-    opt->ImageBase = 0x140000000;
-    opt->SectionAlignment = section_alignment;
-    opt->FileAlignment = file_alignment;
-    opt->MajorOperatingSystemVersion = 4;
-    opt->MinorOperatingSystemVersion = 0;
-    opt->MajorImageVersion = 0;
-    opt->MinorImageVersion = 0;
-    opt->MajorSubsystemVersion = 5;
-    opt->MinorSubsystemVersion = 2;
-    opt->Win32VersionValue = 0;
-    opt->SizeOfImage = image_size;
-    opt->SizeOfHeaders = file_alignment;
-    opt->CheckSum = 0;
-    opt->Subsystem = PE_SUBSYSTEM_WINDOWS_CUI;
-    opt->DllCharacteristics = 0;
-    opt->SizeOfStackReserve = 0x100000;
-    opt->SizeOfStackCommit = 0x1000;
-    opt->SizeOfHeapReserve = 0x100000;
-    opt->SizeOfHeapCommit = 0x1000;
-    opt->LoaderFlags = 0;
-    opt->NumberOfRvaAndSizes = 16;
-    
-    for (int i = 0; i < 16; i++) {
-        opt->DataDirectory[i].VirtualAddress = 0;
-        opt->DataDirectory[i].Size = 0;
-    }
-    
-    if (reloc_size > 0) {
-        opt->DataDirectory[PE_DD_BASE_RELOCATION].VirtualAddress = reloc_rva;
-        opt->DataDirectory[PE_DD_BASE_RELOCATION].Size = reloc_size;
-    }
-}
-
 static void write_section_header(uint8_t* data, size_t index, const char* name,
                                   uint32_t virtual_size, uint32_t virtual_address,
                                   uint32_t size_of_raw_data, uint32_t pointer_to_raw_data,
@@ -696,49 +638,76 @@ static uint8_t* generate_export_table(ArkBackendInput* input, uint32_t edata_rva
     memcpy(sorted_exports, input->exports, input->export_count * sizeof(ArkExportEntry));
     qsort(sorted_exports, input->export_count, sizeof(ArkExportEntry), compare_export_entries);
 
-    size_t edt_offset = export_builder_append(builder, NULL, sizeof(PE_EXPORT_DIRECTORY_ENTRY));
-    if (edt_offset == (size_t)-1) goto fail;
+    size_t count = input->export_count;
+    size_t edt_size = sizeof(PE_EXPORT_DIRECTORY_ENTRY);
+    size_t eat_size = count * sizeof(uint32_t);
+    size_t ent_size = count * sizeof(uint32_t);
+    size_t eot_size = count * sizeof(uint16_t);
 
-    size_t eat_offset = builder->size;
-    size_t eat_size = input->export_count * sizeof(uint32_t);
-    if (export_builder_append(builder, NULL, eat_size) == (size_t)-1) goto fail;
-    uint32_t* eat = (uint32_t*)(builder->data + eat_offset);
-
-    size_t ent_offset = builder->size;
-    size_t ent_size = input->export_count * sizeof(uint32_t);
-    if (export_builder_append(builder, NULL, ent_size) == (size_t)-1) goto fail;
-    uint32_t* ent = (uint32_t*)(builder->data + ent_offset);
-
-    size_t eot_offset = builder->size;
-    size_t eot_size = input->export_count * sizeof(uint16_t);
-    if (export_builder_append(builder, NULL, eot_size) == (size_t)-1) goto fail;
-    uint16_t* eot = (uint16_t*)(builder->data + eot_offset);
-
-    size_t dll_name_offset = builder->size;
     const char* dll_name = input->export_name ? input->export_name : "exported.dll";
     size_t dll_name_len = strlen(dll_name) + 1;
-    if (export_builder_append(builder, dll_name, dll_name_len) == (size_t)-1) goto fail;
 
-    for (size_t i = 0; i < input->export_count; i++) {
+    // 1. 统一预留所有空间（仅记录偏移，不取指针）
+    size_t edt_offset      = export_builder_append(builder, NULL, edt_size);
+    size_t eat_offset      = export_builder_append(builder, NULL, eat_size);
+    size_t ent_offset      = export_builder_append(builder, NULL, ent_size);
+    size_t eot_offset      = export_builder_append(builder, NULL, eot_size);
+    size_t dll_name_offset = export_builder_append(builder, dll_name, dll_name_len);
+
+    // 2. 统一错误检查
+    if (edt_offset == (size_t)-1 || eat_offset == (size_t)-1 ||
+        ent_offset == (size_t)-1 || eot_offset == (size_t)-1 ||
+        dll_name_offset == (size_t)-1) {
+        goto fail;
+    }
+
+    // 3. 先遍历一次，算出每个 name 的长度（不 append）
+    size_t* name_lens = (size_t*)malloc(count * sizeof(size_t));
+    if (!name_lens) goto fail;
+    for (size_t i = 0; i < count; i++) {
+        name_lens[i] = strlen(sorted_exports[i].name) + 1;
+    }
+
+    // 4. 再预分配所有 name slot（仍然不写内容，只占位）
+    size_t* name_offsets = (size_t*)malloc(count * sizeof(size_t));
+    if (!name_offsets) {
+        free(name_lens);
+        goto fail;
+    }
+    for (size_t i = 0; i < count; i++) {
+        name_offsets[i] = export_builder_append(builder, NULL, name_lens[i]);
+        if (name_offsets[i] == (size_t)-1) {
+            free(name_offsets);
+            free(name_lens);
+            goto fail;
+        }
+    }
+
+    // 5. 所有 append 已结束，此时 builder->data 不会再移动，安全取绝对指针
+    uint32_t* eat = (uint32_t*)(builder->data + eat_offset);
+    uint32_t* ent = (uint32_t*)(builder->data + ent_offset);
+    uint16_t* eot = (uint16_t*)(builder->data + eot_offset);
+
+    // 6. 填数据（不再调 append，eat/ent/eot/edt 全部稳定）
+    for (size_t i = 0; i < count; i++) {
         ArkExportEntry* exp = &sorted_exports[i];
-        
-        size_t name_offset = builder->size;
-        size_t name_len = strlen(exp->name) + 1;
-        if (export_builder_append(builder, exp->name, name_len) == (size_t)-1) goto fail;
-        
-        ent[i] = export_builder_get_rva(builder, name_offset);
-        
+        memcpy(builder->data + name_offsets[i], exp->name, name_lens[i]);
+
+        ent[i] = export_builder_get_rva(builder, name_offsets[i]);
         eot[i] = (uint16_t)(exp->ordinal - input->export_ordinal_base);
-        
+
         if (exp->section_index > 0 && exp->section_index <= input->section_count) {
-            eat[exp->ordinal - input->export_ordinal_base] = 
+            eat[exp->ordinal - input->export_ordinal_base] =
                 section_maps[exp->section_index].rva + exp->offset;
         } else {
-            
             eat[exp->ordinal - input->export_ordinal_base] = (uint32_t)exp->value;
         }
     }
 
+    free(name_lens);
+    free(name_offsets);
+
+    // 7. 填充 EDT
     PE_EXPORT_DIRECTORY_ENTRY* edt = (PE_EXPORT_DIRECTORY_ENTRY*)(builder->data + edt_offset);
     edt->ExportFlags = 0;
     edt->TimeDateStamp = 0;
@@ -1063,7 +1032,10 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
         } else if (sec->kind == 3) {
             strcpy(section_name, ".rdata");
         } else {
-            snprintf(section_name, 8, "sect%zu", i);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+            snprintf(section_name, sizeof(section_name), "sect%lu", (unsigned long)i);
+#pragma GCC diagnostic pop
         }
         write_section_header(output->data, i, section_name, virtual_size, virtual_address,
                             raw_size, raw_offset, characteristics);

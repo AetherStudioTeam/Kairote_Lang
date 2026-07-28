@@ -1,4 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
 #include <stddef.h>
 
 extern size_t strlen(const char *s);
@@ -26,7 +25,18 @@ static void KrtIrPushClassContext(KrtIRBuilder* builder, const char* class_name)
 static void KrtIrPopClassContext(KrtIRBuilder* builder);
 static const char* KrtIrCurrentClassContext(KrtIRBuilder* builder);
 static char* KrtIrMangleStaticMember(const char* class_name, const char* member_name);
+static char* KrtIrMangleGenericStaticMember(const char* class_name, const char* member_name, 
+                                            const char** type_args, int type_arg_count);
 static int KrtIrEvaluateNumericConstant(ASTNode* expr, double* out_value);
+
+// Generic type context for static fields
+typedef struct {
+    char** type_args;
+    int type_arg_count;
+} KrtGenericContext;
+
+static KrtGenericContext g_generic_context = {NULL, 0};
+
 static void KrtIrPushNamespaceContext(KrtIRBuilder* builder, const char* namespace_name);
 static void KrtIrPopNamespaceContext(KrtIRBuilder* builder);
 static const char** KrtIrGetNamespacePath(KrtIRBuilder* builder, int* out_count);
@@ -72,8 +82,61 @@ static char* KrtIrMangleCallFunctionName(const char** ns_path, const char* base_
     return name_mangle_function(ns_path, base_name, NULL, 0);
 }
 
+static char* KrtIrMangleClassMethodName(const char* class_name, const char* method_name,
+                                         KrtTokenType* param_types, int param_count) {
+    if (!class_name || !method_name) {
+        return NULL;
+    }
+    const char* ns_path[2] = { class_name, NULL };
+    return name_mangle_function(ns_path, method_name, param_types, param_count);
+}
+
 static char* KrtIrMangleStaticMember(const char* class_name, const char* member_name) {
+    // Check if we are in a generic context
+    if (g_generic_context.type_arg_count > 0 && g_generic_context.type_args) {
+        return KrtIrMangleGenericStaticMember(class_name, member_name, 
+                                               (const char**)g_generic_context.type_args, 
+                                               g_generic_context.type_arg_count);
+    }
     return name_mangle_simple(class_name, member_name);
+}
+
+static char* KrtIrMangleGenericStaticMember(const char* class_name, const char* member_name, 
+                                            const char** type_args, int type_arg_count) {
+    if (!class_name || !member_name) {
+        return NULL;
+    }
+    
+    // Calculate total length needed
+    size_t total_len = strlen(class_name) + strlen(member_name) + 16; // for separators and null
+    for (int i = 0; i < type_arg_count; i++) {
+        if (type_args[i]) {
+            total_len += strlen(type_args[i]) + 1; // +1 for separator
+        }
+    }
+    
+    char* result = (char*)KRT_MALLOC(total_len);
+    if (!result) {
+        return NULL;
+    }
+    
+    // Build mangled name: ClassName__Type1_Type2__member_name
+    strcpy(result, class_name);
+    strcat(result, "__");
+    
+    for (int i = 0; i < type_arg_count; i++) {
+        if (type_args[i]) {
+            if (i > 0) {
+                strcat(result, "_");
+            }
+            strcat(result, type_args[i]);
+        }
+    }
+    
+    strcat(result, "__");
+    strcat(result, member_name);
+    
+    return result;
 }
 
 static void KrtIrPushNamespaceContext(KrtIRBuilder* builder, const char* namespace_name) {
@@ -138,6 +201,16 @@ static bool is_string_expression(KrtIRBuilder* builder, ASTNode* expr) {
         return true;
     }
     if (expr->type == AST_IDENTIFIER) {
+        if (builder->type_context && builder->type_context->current_scope) {
+            TypeCheckSymbolTable* scope = builder->type_context->current_scope;
+            while (scope) {
+                TypeCheckSymbol* symbol = type_check_symbol_table_lookup(scope, expr->data.identifier_name);
+                if (symbol && symbol->type) {
+                    return symbol->type->kind == TYPE_STRING;
+                }
+                scope = scope->parent;
+            }
+        }
         return false;
     }
     if (expr->type == AST_BINARY_OPERATION && expr->data.binary_op.operator == TOKEN_PLUS) {
@@ -374,6 +447,11 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
             }
             const char* current_class = KrtIrCurrentClassContext(builder);
             if (current_class && var_name) {
+                int field_offset = KrtIrLayoutGetOffset(builder, current_class, var_name);
+                if (field_offset >= 0) {
+                    KrtIRValue this_val = KrtIrArg(builder, 0);
+                    return KrtIrLoadPtr(builder, this_val, field_offset);
+                }
                 char* mangled = KrtIrMangleStaticMember(current_class, var_name);
                 if (mangled) {
                     KrtIRGlobal* global = KrtIrModuleFindGlobal(builder->module, mangled);
@@ -413,7 +491,8 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
             args[0] = KrtIrImm(builder, alloc_size);
             KrtIRValue obj = KrtIrCall(builder, "KrtMalloc", args, 1);
             KRT_FREE(args);
-            char* ctor_name = KrtIrMangleStaticMember(class_name, "constructor");
+            int ac = expr->data.new_expr.argument_count;
+            char* ctor_name = name_mangle_constructor(class_name, ac);
             if (ctor_name) {
                 bool exists = false;
                 KrtIRFunction* f = builder->module->functions;
@@ -427,7 +506,6 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 if (!exists) {
                     KrtIrFunctionCreate(builder, ctor_name, NULL, -1, TOKEN_VOID);
                 }
-                int ac = expr->data.new_expr.argument_count;
                 KrtIRValue* cargs = (KrtIRValue*)KRT_MALLOC((ac + 1) * sizeof(KrtIRValue));
                 if (cargs) {
                     cargs[0] = obj;
@@ -448,6 +526,15 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 case TOKEN_ASSIGN: {
                     if (expr->data.binary_op.left->type == AST_IDENTIFIER) {
                         const char* name = expr->data.binary_op.left->data.identifier_name;
+                        const char* current_class = KrtIrCurrentClassContext(builder);
+                        if (current_class) {
+                            int field_offset = KrtIrLayoutGetOffset(builder, current_class, name);
+                            if (field_offset >= 0) {
+                                KrtIRValue this_val = KrtIrArg(builder, 0);
+                                KrtIrStorePtr(builder, this_val, field_offset, rhs);
+                                return rhs;
+                            }
+                        }
                         KrtIrStore(builder, name, rhs);
                         return rhs;
                     }
@@ -703,14 +790,47 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 return void_val;
             }
             
-            int ns_count = 0;
+            if (expr->data.static_call.resolved_mangled_name) {
+                const char* mangled_name = expr->data.static_call.resolved_mangled_name;
+                bool function_exists = false;
+                KrtIRFunction* iter = builder->module->functions;
+                while (iter) {
+                    if (strcmp(iter->name, mangled_name) == 0) {
+                        function_exists = true;
+                        break;
+                    }
+                    iter = iter->next;
+                }
+                if (!function_exists) {
+                    KrtIrFunctionCreate(builder, mangled_name, NULL, -1, TOKEN_VOID);
+                }
+
+                KrtIRValue* args = NULL;
+                if (expr->data.static_call.argument_count > 0) {
+                    args = (KrtIRValue*)KRT_MALLOC(expr->data.static_call.argument_count * sizeof(KrtIRValue));
+                    if (!args) {
+                        KrtIRValue void_val = {0};
+                        void_val.type = KRT_IR_VALUE_VOID;
+                        return void_val;
+                    }
+                    for (int i = 0; i < expr->data.static_call.argument_count; i++) {
+                        args[i] = KrtIrGenerateExpression(builder, expr->data.static_call.arguments[i]);
+                    }
+                }
+
+                KrtIRValue result = KrtIrCall(builder, mangled_name, args, expr->data.static_call.argument_count);
+                if (args) {
+                    KRT_FREE(args);
+                }
+                return result;
+            }
+            
             const char** ns_path = NULL;
             if (class_name) {
                 ns_path = (const char**)KRT_MALLOC(2 * sizeof(const char*));
                 if (ns_path) {
                     ns_path[0] = class_name;
                     ns_path[1] = NULL;
-                    ns_count = 1;
                 }
             }
             char* mangled_name = KrtIrMangleCallFunctionName(ns_path, method_name,
@@ -765,15 +885,23 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 expr->data.member_access.object->type == AST_IDENTIFIER) {
                 const char* class_name = expr->data.member_access.object->data.identifier_name;
                 const char* member_name = expr->data.member_access.member_name;
-                char* mangled_name = KrtIrMangleStaticMember(class_name, member_name);
+                const char* mangled_name = expr->data.member_access.resolved_mangled_name;
                 if (mangled_name) {
                     KrtIRGlobal* global = KrtIrModuleFindGlobal(builder->module, mangled_name);
                     if (global) {
                         KrtIRValue value = KrtIrLoad(builder, mangled_name);
-                        KRT_FREE(mangled_name);
                         return value;
                     }
-                    KRT_FREE(mangled_name);
+                }
+                char* fallback_mangled = KrtIrMangleStaticMember(class_name, member_name);
+                if (fallback_mangled) {
+                    KrtIRGlobal* global = KrtIrModuleFindGlobal(builder->module, fallback_mangled);
+                    if (global) {
+                        KrtIRValue value = KrtIrLoad(builder, fallback_mangled);
+                        KRT_FREE(fallback_mangled);
+                        return value;
+                    }
+                    KRT_FREE(fallback_mangled);
                 }
             }
 
@@ -802,6 +930,29 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
             const char* func_name = expr->data.call.name;
 
             const char* alt_mangled = NULL;
+            if (expr->data.call.object && expr->data.call.object->type == AST_MEMBER_ACCESS) {
+                ASTNode* member = expr->data.call.object;
+                if (member->data.member_access.resolved_class_name) {
+                    const char* class_name = member->data.member_access.resolved_class_name;
+                    const char* method_name = member->data.member_access.member_name;
+                    char* mangled = KrtIrMangleStaticMember(class_name, method_name);
+                    if (mangled) {
+                        int total_args = expr->data.call.argument_count + 1;
+                        KrtIRValue* iargs = (KrtIRValue*)KRT_MALLOC(total_args * sizeof(KrtIRValue));
+                        if (iargs) {
+                            iargs[0] = KrtIrGenerateExpression(builder, member->data.member_access.object);
+                            for (int i = 0; i < expr->data.call.argument_count; i++) {
+                                iargs[i + 1] = KrtIrGenerateExpression(builder, expr->data.call.arguments[i]);
+                            }
+                            KrtIRValue result = KrtIrCall(builder, mangled, iargs, total_args);
+                            KRT_FREE(iargs);
+                            KRT_FREE(mangled);
+                            return result;
+                        }
+                        KRT_FREE(mangled);
+                    }
+                }
+            }
             if (expr->data.call.object && expr->data.call.object->type == AST_IDENTIFIER && strcmp(expr->data.call.name, "delete") == 0) {
                 const char* class_name = expr->data.call.object->data.identifier_name;
                 char* dtor_name = KrtIrMangleStaticMember(class_name, "destructor");
@@ -854,33 +1005,54 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                             return result;
                         }
                     } else {
-                        
                         const char* class_name = expr->data.call.resolved_class_name;
-                        const char** ns_path = NULL;
-                        if (class_name) {
-                            ns_path = (const char**)KRT_MALLOC(2 * sizeof(const char*));
-                            if (ns_path) {
-                                ns_path[0] = class_name;
-                                ns_path[1] = NULL;
-                            }
-                        }
-                        char* mangled = KrtIrMangleCallFunctionName(ns_path, expr->data.call.name,
-                                                                     expr->data.call.arguments,
-                                                                     expr->data.call.argument_count);
-                        if (ns_path) KRT_FREE(ns_path);
-                        if (mangled) {
-                            
-                            KrtIRValue* iargs = (KrtIRValue*)KRT_MALLOC(expr->data.call.argument_count * sizeof(KrtIRValue));
-                            if (iargs) {
-                                for (int i = 0; i < expr->data.call.argument_count; i++) {
-                                    iargs[i] = KrtIrGenerateExpression(builder, expr->data.call.arguments[i]);
+                        const char* object_name = expr->data.call.object->data.identifier_name;
+
+                        if (class_name && object_name && strcmp(object_name, class_name) == 0) {
+                            // 静态方法调用：Class.Method(...)
+                            const char** ns_path = NULL;
+                            if (class_name) {
+                                ns_path = (const char**)KRT_MALLOC(2 * sizeof(const char*));
+                                if (ns_path) {
+                                    ns_path[0] = class_name;
+                                    ns_path[1] = NULL;
                                 }
-                                KrtIRValue result = KrtIrCall(builder, mangled, iargs, expr->data.call.argument_count);
-                                KRT_FREE(iargs);
-                                KRT_FREE(mangled);
-                                return result;
                             }
-                            KRT_FREE(mangled);
+                            char* mangled = KrtIrMangleCallFunctionName(ns_path, expr->data.call.name,
+                                                                         expr->data.call.arguments,
+                                                                         expr->data.call.argument_count);
+                            if (ns_path) KRT_FREE(ns_path);
+                            if (mangled) {
+                                KrtIRValue* iargs = (KrtIRValue*)KRT_MALLOC(expr->data.call.argument_count * sizeof(KrtIRValue));
+                                if (iargs) {
+                                    for (int i = 0; i < expr->data.call.argument_count; i++) {
+                                        iargs[i] = KrtIrGenerateExpression(builder, expr->data.call.arguments[i]);
+                                    }
+                                    KrtIRValue result = KrtIrCall(builder, mangled, iargs, expr->data.call.argument_count);
+                                    KRT_FREE(iargs);
+                                    KRT_FREE(mangled);
+                                    return result;
+                                }
+                                KRT_FREE(mangled);
+                            }
+                        } else {
+                            // 实例方法调用：obj.Method(...)，需要传递 this 指针
+                            char* mangled = KrtIrMangleStaticMember(class_name, expr->data.call.name);
+                            if (mangled) {
+                                int total_args = expr->data.call.argument_count + 1;
+                                KrtIRValue* iargs = (KrtIRValue*)KRT_MALLOC(total_args * sizeof(KrtIRValue));
+                                if (iargs) {
+                                    iargs[0] = KrtIrGenerateExpression(builder, expr->data.call.object);
+                                    for (int i = 0; i < expr->data.call.argument_count; i++) {
+                                        iargs[i + 1] = KrtIrGenerateExpression(builder, expr->data.call.arguments[i]);
+                                    }
+                                    KrtIRValue result = KrtIrCall(builder, mangled, iargs, total_args);
+                                    KRT_FREE(iargs);
+                                    KRT_FREE(mangled);
+                                    return result;
+                                }
+                                KRT_FREE(mangled);
+                            }
                         }
                     }
                 } else {
@@ -1360,9 +1532,101 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
         }
 
         case AST_LINQ_QUERY: {
-            KrtIRValue void_val = {0};
-            void_val.type = KRT_IR_VALUE_VOID;
-            return void_val;
+            // Generate IR for LINQ query expressions
+            // Transform LINQ query into method calls
+            ASTNode* from_clause = expr->data.linq_query.from_clause;
+            ASTNode** clauses = expr->data.linq_query.clauses;
+            int clause_count = expr->data.linq_query.clause_count;
+            ASTNode* select_clause = expr->data.linq_query.select_clause;
+            
+            if (!from_clause || from_clause->type != AST_LINQ_FROM) {
+                KrtIRValue void_val = {0};
+                void_val.type = KRT_IR_VALUE_VOID;
+                return void_val;
+            }
+            
+            // Generate source enumerable
+            KrtIRValue source = KrtIrGenerateExpression(builder, from_clause->data.linq_from.source);
+            
+            // Process each clause (where, orderby, let, group by, etc.)
+            for (int i = 0; i < clause_count; i++) {
+                ASTNode* clause = clauses[i];
+                if (!clause) continue;
+                
+                switch (clause->type) {
+                    case AST_LINQ_WHERE: {
+                        // Generate Where call with predicate
+                        KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+                        if (args) {
+                            args[0] = source;
+                            // For now, pass the condition expression as a lambda reference
+                            args[1] = KrtIrImm(builder, 0); // Placeholder for predicate
+                            source = KrtIrCall(builder, "KrtLinqWhere", args, 2);
+                            KRT_FREE(args);
+                        }
+                        break;
+                    }
+                    case AST_LINQ_ORDERBY: {
+                        // Generate OrderBy call
+                        KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(3 * sizeof(KrtIRValue));
+                        if (args) {
+                            args[0] = source;
+                            args[1] = KrtIrImm(builder, clause->data.linq_orderby.ascending ? 1 : 0);
+                            // Key selector would be generated here
+                            args[2] = KrtIrImm(builder, 0);
+                            source = KrtIrCall(builder, "KrtLinqOrderBy", args, 3);
+                            KRT_FREE(args);
+                        }
+                        break;
+                    }
+                    case AST_LINQ_LET: {
+                        // Let clause creates a temporary variable
+                        // Store the expression result in a temporary
+                        KrtIRValue let_value = KrtIrGenerateExpression(builder, clause->data.linq_let.expression);
+                        char let_var[64];
+                        snprintf(let_var, sizeof(let_var), "__let_%s", clause->data.linq_let.var_name);
+                        KrtIrAlloc(builder, let_var);
+                        KrtIrStore(builder, let_var, let_value);
+                        break;
+                    }
+                    case AST_LINQ_GROUP: {
+                        // Group by into - creates a grouped result
+                        KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(4 * sizeof(KrtIRValue));
+                        if (args) {
+                            args[0] = source;
+                            // Key expression
+                            args[1] = KrtIrGenerateExpression(builder, clause->data.linq_group.key_expression);
+                            // Element expression
+                            args[2] = KrtIrGenerateExpression(builder, clause->data.linq_group.element_expression);
+                            // Into variable name
+                            args[3] = KrtIrStringConst(builder, clause->data.linq_group.into_var_name ? clause->data.linq_group.into_var_name : "");
+                            source = KrtIrCall(builder, "KrtLinqGroupBy", args, 4);
+                            KRT_FREE(args);
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+            
+            // Generate final Select if present
+            if (select_clause && select_clause->type == AST_LINQ_SELECT) {
+                KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+                if (args) {
+                    args[0] = source;
+                    // Selector expression
+                    if (select_clause->data.linq_select.expression) {
+                        args[1] = KrtIrGenerateExpression(builder, select_clause->data.linq_select.expression);
+                    } else {
+                        args[1] = KrtIrImm(builder, 0);
+                    }
+                    source = KrtIrCall(builder, "KrtLinqSelect", args, 2);
+                    KRT_FREE(args);
+                }
+            }
+            
+            return source;
         }
 
         case AST_UNSAFE_CALL: {
@@ -1377,6 +1641,511 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 KrtIRValue result = KrtIrGenerateExpression(builder, nested_node);
                 return result;
             }
+        }
+
+        case AST_DEFAULT_EXPRESSION: {
+            KrtIRValue zero_val = KrtIrImm(builder, 0);
+            return zero_val;
+        }
+
+        case AST_IS_EXPRESSION: {
+            KrtIRValue expr_val = KrtIrGenerateExpression(builder, expr->data.is_expr.expression);
+            const char* type_name = expr->data.is_expr.type_name;
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+            if (!args) {
+                return KrtIrImm(builder, 0);
+            }
+            args[0] = expr_val;
+            if (type_name) {
+                args[1] = KrtIrStringConst(builder, type_name);
+            } else {
+                args[1] = KrtIrImm(builder, 0);
+                args[1].type = KRT_IR_VALUE_STRING_CONST;
+                args[1].data.string_const_id = -1;
+            }
+            KrtIRValue result = KrtIrCall(builder, "KrtIsInstance", args, 2);
+            KRT_FREE(args);
+            return result;
+        }
+
+        case AST_AS_EXPRESSION: {
+            KrtIRValue expr_val = KrtIrGenerateExpression(builder, expr->data.as_expr.expression);
+            const char* type_name = expr->data.as_expr.type_name;
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+            if (!args) {
+                return expr_val;
+            }
+            args[0] = expr_val;
+            if (type_name) {
+                args[1] = KrtIrStringConst(builder, type_name);
+            } else {
+                args[1] = KrtIrImm(builder, 0);
+                args[1].type = KRT_IR_VALUE_STRING_CONST;
+                args[1].data.string_const_id = -1;
+            }
+            KrtIRValue result = KrtIrCall(builder, "KrtAsInstance", args, 2);
+            KRT_FREE(args);
+            return result;
+        }
+
+        case AST_SIZEOF_EXPRESSION: {
+            KrtTokenType type_token = expr->data.sizeof_expr.type_token;
+            const char* sizeof_func = NULL;
+            
+            switch (type_token) {
+                case TOKEN_INT32:
+                    sizeof_func = "KrtSizeOfInt32";
+                    break;
+                case TOKEN_INT64:
+                    sizeof_func = "KrtSizeOfInt64";
+                    break;
+                case TOKEN_FLOAT32:
+                    sizeof_func = "KrtSizeOfFloat32";
+                    break;
+                case TOKEN_FLOAT64:
+                    sizeof_func = "KrtSizeOfFloat64";
+                    break;
+                default:
+                    // For unknown types, return pointer size as default
+                    sizeof_func = "KrtSizeOfPointer";
+                    break;
+            }
+            
+            return KrtIrCall(builder, sizeof_func, NULL, 0);
+        }
+
+        case AST_INTERPOLATED_STRING: {
+            // Generate IR for interpolated string: $"Hello {name}!"
+            // Build the string by concatenating parts and converted expressions
+            
+            int part_count = expr->data.interpolated_string.part_count;
+            int expr_count = expr->data.interpolated_string.expression_count;
+            char** parts = expr->data.interpolated_string.string_parts;
+            ASTNode** expressions = expr->data.interpolated_string.expressions;
+            
+            if (part_count == 0 && expr_count == 0) {
+                // Empty string
+                return KrtIrStringConst(builder, "");
+            }
+            
+            // Start with first part (or empty if none)
+            KrtIRValue result;
+            int part_idx = 0;
+            int expr_idx = 0;
+            
+            if (part_count > 0 && parts[0]) {
+                result = KrtIrStringConst(builder, parts[0]);
+                part_idx = 1;
+            } else {
+                result = KrtIrStringConst(builder, "");
+            }
+            
+            // Interleave expressions and parts
+            while (expr_idx < expr_count || part_idx < part_count) {
+                // Add expression if available
+                if (expr_idx < expr_count && expressions[expr_idx]) {
+                    // Generate expression and convert to string
+                    KrtIRValue expr_val = KrtIrGenerateExpression(builder, expressions[expr_idx]);
+                    
+                    // Convert to string based on type
+                    // For simplicity, assume int32 for now
+                    KrtIRValue expr_str_args[1] = { expr_val };
+                    KrtIRValue expr_str = KrtIrCall(builder, "KrtInt32ToString", expr_str_args, 1);
+                    
+                    // Concatenate
+                    KrtIRValue concat_args[2] = { result, expr_str };
+                    result = KrtIrCall(builder, "KrtStringConcat", concat_args, 2);
+                    
+                    expr_idx++;
+                }
+                
+                // Add next part if available
+                if (part_idx < part_count && parts[part_idx]) {
+                    KrtIRValue part_val = KrtIrStringConst(builder, parts[part_idx]);
+                    KrtIRValue concat_args[2] = { result, part_val };
+                    result = KrtIrCall(builder, "KrtStringConcat", concat_args, 2);
+                    part_idx++;
+                }
+            }
+            
+            return result;
+        }
+
+        case AST_TUPLE_EXPRESSION: {
+            // Generate IR for tuple expression: (1, "hello", true)
+            // For now, we'll allocate a tuple on the heap and store elements
+            int count = expr->data.tuple_expr.element_count;
+            ASTNode** elements = expr->data.tuple_expr.elements;
+            
+            // Allocate memory for tuple (pointer array)
+            int tuple_size = count * 8; // 8 bytes per pointer
+            KrtIRValue size_val = KrtIrImm(builder, tuple_size);
+            KrtIRValue* alloc_args = (KrtIRValue*)KRT_MALLOC(1 * sizeof(KrtIRValue));
+            if (!alloc_args) {
+                return KrtIrImm(builder, 0);
+            }
+            alloc_args[0] = size_val;
+            KrtIRValue tuple_ptr = KrtIrCall(builder, "KrtMalloc", alloc_args, 1);
+            KRT_FREE(alloc_args);
+            
+            // Store each element
+            for (int i = 0; i < count; i++) {
+                KrtIRValue elem_val = KrtIrGenerateExpression(builder, elements[i]);
+                
+                // Calculate offset
+                KrtIRValue offset = KrtIrImm(builder, i * 8);
+                
+                // Store element at tuple_ptr + offset
+                KrtIRValue* store_args = (KrtIRValue*)KRT_MALLOC(3 * sizeof(KrtIRValue));
+                if (store_args) {
+                    store_args[0] = tuple_ptr;
+                    store_args[1] = offset;
+                    store_args[2] = elem_val;
+                    KrtIrCall(builder, "KrtStorePtr", store_args, 3);
+                    KRT_FREE(store_args);
+                }
+            }
+            
+            return tuple_ptr;
+        }
+
+        case AST_TUPLE_ELEMENT_ACCESS: {
+            // Access tuple element: tuple.Item1 or tuple.Item2
+            KrtIRValue tuple_val = KrtIrGenerateExpression(builder, expr->data.tuple_element_access.tuple);
+            int index = expr->data.tuple_element_access.index;
+            
+            // Calculate offset
+            KrtIRValue offset = KrtIrImm(builder, index * 8);
+            
+            // Load element from tuple_ptr + offset
+            KrtIRValue* load_args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+            if (!load_args) {
+                return KrtIrImm(builder, 0);
+            }
+            load_args[0] = tuple_val;
+            load_args[1] = offset;
+            KrtIRValue result = KrtIrCall(builder, "KrtLoadPtr", load_args, 2);
+            KRT_FREE(load_args);
+            
+            return result;
+        }
+
+        case AST_CAST_EXPRESSION: {
+            KrtIRValue expr_val = KrtIrGenerateExpression(builder, expr->data.cast_expr.expression);
+            KrtTokenType target_type = expr->data.cast_expr.target_type;
+            
+            // For primitive types, generate direct cast instructions
+            // For reference types, this would call a runtime conversion function
+            const char* cast_func = NULL;
+            switch (target_type) {
+                case TOKEN_INT32:
+                    cast_func = "KrtCastToInt32";
+                    break;
+                case TOKEN_INT64:
+                    cast_func = "KrtCastToInt64";
+                    break;
+                case TOKEN_FLOAT32:
+                    cast_func = "KrtCastToFloat32";
+                    break;
+                case TOKEN_FLOAT64:
+                    cast_func = "KrtCastToFloat64";
+                    break;
+                case TOKEN_BOOL:
+                    cast_func = "KrtCastToBool";
+                    break;
+                case TOKEN_TYPE_STRING:
+                    cast_func = "KrtCastToString";
+                    break;
+                default:
+                    // For other types, just return the value as-is for now
+                    return expr_val;
+            }
+            
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(1 * sizeof(KrtIRValue));
+            if (!args) {
+                return expr_val;
+            }
+            args[0] = expr_val;
+            KrtIRValue result = KrtIrCall(builder, cast_func, args, 1);
+            KRT_FREE(args);
+            return result;
+        }
+
+        case AST_DELEGATE_DECLARATION: {
+            // Delegate declaration creates a function pointer type
+            // For now, return a placeholder value
+            // The actual delegate instance would be created when assigned
+            KrtIRValue delegate_val = KrtIrImm(builder, 0);
+            return delegate_val;
+        }
+
+        case AST_DELEGATE_TYPE: {
+            // Delegate type reference - return placeholder
+            KrtIRValue delegate_type_val = KrtIrImm(builder, 0);
+            return delegate_type_val;
+        }
+
+        case AST_MATCH_EXPRESSION: {
+            // Pattern matching expression - Complete implementation
+            KrtIRValue match_expr = KrtIrGenerateExpression(builder, expr->data.match_expr.expression);
+            ASTNode** cases = expr->data.match_expr.cases;
+            int case_count = expr->data.match_expr.case_count;
+            
+            if (case_count == 0) {
+                return KrtIrImm(builder, 0);
+            }
+            
+            // Create result variable
+            char result_var[32];
+            snprintf(result_var, sizeof(result_var), "match_result_%d", builder->temp_counter++);
+            KrtIrAlloc(builder, result_var);
+            
+            // Generate labels
+            char** case_labels = (char**)KRT_MALLOC(case_count * sizeof(char*));
+            char** check_labels = (char**)KRT_MALLOC(case_count * sizeof(char*));
+            char end_label[64];
+            char default_label[64];
+            int has_default = 0;
+            int default_index = -1;
+            snprintf(end_label, sizeof(end_label), "match_end_%d", builder->label_counter++);
+            snprintf(default_label, sizeof(default_label), "match_default_%d", builder->label_counter++);
+            
+            for (int i = 0; i < case_count; i++) {
+                case_labels[i] = (char*)KRT_MALLOC(64);
+                check_labels[i] = (char*)KRT_MALLOC(64);
+                snprintf(case_labels[i], 64, "match_case_%d_%d", builder->label_counter++, i);
+                snprintf(check_labels[i], 64, "match_check_%d_%d", builder->label_counter++, i);
+                
+                // Check if this is a default/wildcard case
+                ASTNode* case_node = cases[i];
+                if (case_node && case_node->type == AST_PATTERN_CASE) {
+                    ASTNode* pattern = case_node->data.pattern_case.pattern;
+                    if (pattern && (pattern->type == AST_PATTERN_WILDCARD ||
+                                   pattern->type == AST_PATTERN_VARIABLE)) {
+                        has_default = 1;
+                        default_index = i;
+                    }
+                }
+            }
+            
+            // Jump to first check block
+            KrtIrJump(builder, KrtIrBlockCreate(builder, check_labels[0]));
+            
+            // Generate pattern matching logic with proper control flow
+            for (int i = 0; i < case_count; i++) {
+                ASTNode* case_node = cases[i];
+                if (!case_node || case_node->type != AST_PATTERN_CASE) continue;
+                
+                // Check block - evaluate pattern match condition
+                KrtIRBasicBlock* check_block = KrtIrBlockCreate(builder, check_labels[i]);
+                KrtIrBlockSetCurrent(builder, check_block);
+                
+                ASTNode* pattern = case_node->data.pattern_case.pattern;
+                KrtIRBasicBlock* case_block = KrtIrBlockCreate(builder, case_labels[i]);
+                KrtIRBasicBlock* next_check = NULL;
+                
+                if (i + 1 < case_count) {
+                    next_check = KrtIrBlockCreate(builder, check_labels[i + 1]);
+                } else if (has_default && default_index != i) {
+                    next_check = KrtIrBlockCreate(builder, check_labels[default_index]);
+                } else {
+                    next_check = KrtIrBlockCreate(builder, end_label);
+                }
+                
+                if (pattern) {
+                    switch (pattern->type) {
+                        case AST_PATTERN_LITERAL: {
+                            // Compare with literal value
+                            KrtIRValue literal_val = KrtIrGenerateExpression(builder, pattern->data.pattern_literal.value);
+                            KrtIRValue cmp_result = KrtIrCompare(builder, KRT_IR_EQ, match_expr, literal_val);
+                            KrtIrBranch(builder, cmp_result, case_block, next_check);
+                            break;
+                        }
+                        case AST_PATTERN_TUPLE: {
+                            // Tuple pattern: check if value is a tuple with matching elements
+                            // For now, treat as always matching (full implementation would check element count and types)
+                            KrtIrJump(builder, case_block);
+                            break;
+                        }
+                        case AST_PATTERN_VARIABLE: {
+                            // Variable pattern - bind value and always match
+                            const char* var_name = pattern->data.pattern_variable.name;
+                            if (var_name) {
+                                KrtIrAlloc(builder, var_name);
+                                KrtIrStore(builder, var_name, match_expr);
+                            }
+                            KrtIrJump(builder, case_block);
+                            break;
+                        }
+                        case AST_PATTERN_WILDCARD: {
+                            // Wildcard pattern - always matches
+                            KrtIrJump(builder, case_block);
+                            break;
+                        }
+                        default: {
+                            KrtIrJump(builder, next_check);
+                            break;
+                        }
+                    }
+                } else {
+                    KrtIrJump(builder, case_block);
+                }
+                
+                // Case body block
+                KrtIrBlockSetCurrent(builder, case_block);
+                if (case_node->data.pattern_case.body) {
+                    KrtIRValue case_result = KrtIrGenerateExpression(builder, case_node->data.pattern_case.body);
+                    KrtIrStore(builder, result_var, case_result);
+                }
+                KrtIrJump(builder, KrtIrBlockCreate(builder, end_label));
+            }
+            
+            // End block
+            KrtIrBlockSetCurrent(builder, KrtIrBlockCreate(builder, end_label));
+            
+            // Cleanup
+            for (int i = 0; i < case_count; i++) {
+                if (case_labels[i]) KRT_FREE(case_labels[i]);
+                if (check_labels[i]) KRT_FREE(check_labels[i]);
+            }
+            KRT_FREE(case_labels);
+            KRT_FREE(check_labels);
+            
+            return KrtIrLoad(builder, result_var);
+        }
+
+        case AST_POINTER_TYPE: {
+            // Pointer type declaration - return size of pointer
+            KrtIRValue ptr_size = KrtIrCall(builder, "KrtSizeOfPointer", NULL, 0);
+            return ptr_size;
+        }
+
+        case AST_POINTER_DEREFERENCE: {
+            // Pointer dereference: *ptr
+            KrtIRValue ptr_val = KrtIrGenerateExpression(builder, expr->data.pointer_deref.pointer);
+            // Load value from pointer address
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+            if (!args) {
+                return KrtIrImm(builder, 0);
+            }
+            args[0] = ptr_val;
+            args[1] = KrtIrImm(builder, 0); // Offset 0
+            KrtIRValue result = KrtIrCall(builder, "KrtLoadPtr", args, 2);
+            KRT_FREE(args);
+            return result;
+        }
+
+        case AST_ADDRESS_OF: {
+            // Address-of operator: &variable
+            ASTNode* operand = expr->data.address_of.operand;
+            if (operand && operand->type == AST_IDENTIFIER) {
+                // Get address of variable
+                KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(1 * sizeof(KrtIRValue));
+                if (!args) {
+                    return KrtIrImm(builder, 0);
+                }
+                args[0] = KrtIrStringConst(builder, operand->data.identifier_name);
+                KrtIRValue addr = KrtIrCall(builder, "KrtGetVariableAddress", args, 1);
+                KRT_FREE(args);
+                return addr;
+            }
+            return KrtIrImm(builder, 0);
+        }
+
+        case AST_STACKALLOC_EXPRESSION: {
+            // Stack allocation expression
+            KrtTokenType type_token = expr->data.stackalloc_expr.type_token;
+            struct ASTNode* count_expr = expr->data.stackalloc_expr.count_expr;
+            
+            // Get size per element
+            int elem_size = 8; // Default to pointer size
+            switch (type_token) {
+                case TOKEN_INT8:
+                case TOKEN_UINT8:
+                    elem_size = 1;
+                    break;
+                case TOKEN_INT16:
+                case TOKEN_UINT16:
+                    elem_size = 2;
+                    break;
+                case TOKEN_INT32:
+                case TOKEN_UINT32:
+                case TOKEN_FLOAT32:
+                    elem_size = 4;
+                    break;
+                case TOKEN_INT64:
+                case TOKEN_UINT64:
+                case TOKEN_FLOAT64:
+                default:
+                    elem_size = 8;
+                    break;
+            }
+            
+            // Calculate total size
+            KrtIRValue count_val = KrtIrGenerateExpression(builder, count_expr);
+            KrtIRValue elem_size_val = KrtIrImm(builder, elem_size);
+            KrtIRValue total_size = KrtIrMul(builder, count_val, elem_size_val);
+            
+            // Allocate on stack
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(1 * sizeof(KrtIRValue));
+            if (!args) {
+                return KrtIrImm(builder, 0);
+            }
+            args[0] = total_size;
+            KrtIRValue stack_ptr = KrtIrCall(builder, "KrtStackAlloc", args, 1);
+            KRT_FREE(args);
+            
+            return stack_ptr;
+        }
+
+        case AST_AWAIT_EXPRESSION: {
+            // Async/await - await expression
+            // Generate IR for awaiting a task
+            KrtIRValue await_expr = KrtIrGenerateExpression(builder, expr->data.await_expr.expression);
+            
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(1 * sizeof(KrtIRValue));
+            if (!args) {
+                return KrtIrImm(builder, 0);
+            }
+            args[0] = await_expr;
+            KrtIRValue result = KrtIrCall(builder, "KrtAwaitTask", args, 1);
+            KRT_FREE(args);
+            
+            return result;
+        }
+
+        case AST_NULL_COALESCING: {
+            KrtIRValue left_val = KrtIrGenerateExpression(builder, expr->data.null_coalescing.left);
+            KrtIRValue right_val = KrtIrGenerateExpression(builder, expr->data.null_coalescing.right);
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+            if (!args) {
+                return left_val;
+            }
+            args[0] = left_val;
+            args[1] = right_val;
+            KrtIRValue result = KrtIrCall(builder, "KrtNullCoalesce", args, 2);
+            KRT_FREE(args);
+            return result;
+        }
+
+        case AST_NULL_CONDITIONAL: {
+            KrtIRValue expr_val = KrtIrGenerateExpression(builder, expr->data.null_conditional.expression);
+            const char* member_name = expr->data.null_conditional.member_name;
+            KrtIRValue* args = (KrtIRValue*)KRT_MALLOC(2 * sizeof(KrtIRValue));
+            if (!args) {
+                return KrtIrImm(builder, 0);
+            }
+            args[0] = expr_val;
+            if (member_name) {
+                args[1] = KrtIrStringConst(builder, member_name);
+            } else {
+                args[1] = KrtIrImm(builder, 0);
+                args[1].type = KRT_IR_VALUE_STRING_CONST;
+                args[1].data.string_const_id = -1;
+            }
+            KrtIRValue result = KrtIrCall(builder, "KrtNullConditional", args, 2);
+            KRT_FREE(args);
+            return result;
         }
 
         default: {
@@ -1399,6 +2168,14 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             const char* current_class = KrtIrCurrentClassContext(builder);
             int stored = 0;
             if (current_class && target_name) {
+                int field_offset = KrtIrLayoutGetOffset(builder, current_class, target_name);
+                if (field_offset >= 0) {
+                    KrtIRValue this_val = KrtIrArg(builder, 0);
+                    KrtIrStorePtr(builder, this_val, field_offset, value);
+                    stored = 1;
+                }
+            }
+            if (!stored && current_class && target_name) {
                 char* mangled = KrtIrMangleStaticMember(current_class, target_name);
                 if (mangled) {
                     KrtIRGlobal* global = KrtIrModuleFindGlobal(builder->module, mangled);
@@ -1828,6 +2605,228 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             break;
         }
 
+        case AST_LOCK_STATEMENT: {
+            KrtIRValue lock_obj = KrtIrGenerateExpression(builder, stmt->data.lock_stmt.lock_object);
+            KrtIRValue* enter_args = (KrtIRValue*)KRT_MALLOC(sizeof(KrtIRValue));
+            if (enter_args) {
+                enter_args[0] = lock_obj;
+                KrtIrCall(builder, "Monitor_Enter", enter_args, 1);
+                KRT_FREE(enter_args);
+            }
+            KrtIrGenerateStatement(builder, stmt->data.lock_stmt.body);
+            KrtIRValue* exit_args = (KrtIRValue*)KRT_MALLOC(sizeof(KrtIRValue));
+            if (exit_args) {
+                exit_args[0] = lock_obj;
+                KrtIrCall(builder, "Monitor_Exit", exit_args, 1);
+                KRT_FREE(exit_args);
+            }
+            break;
+        }
+
+        case AST_FIXED_STATEMENT: {
+            // Fixed statement for pinning managed objects
+            // Generate the expression to get the pointer
+            KrtIRValue fixed_expr = KrtIrGenerateExpression(builder, stmt->data.fixed_statement.expression);
+            
+            // Allocate a variable to hold the pointer
+            const char* var_name = stmt->data.fixed_statement.variable_name;
+            if (var_name) {
+                KrtIrAlloc(builder, var_name);
+                KrtIrStore(builder, var_name, fixed_expr);
+            }
+            
+            // Pin the object (call runtime to pin)
+            KrtIRValue* pin_args = (KrtIRValue*)KRT_MALLOC(1 * sizeof(KrtIRValue));
+            if (pin_args) {
+                pin_args[0] = fixed_expr;
+                KrtIrCall(builder, "KrtPinObject", pin_args, 1);
+                KRT_FREE(pin_args);
+            }
+            
+            // Generate the body
+            KrtIrGenerateStatement(builder, stmt->data.fixed_statement.body);
+            
+            // Unpin the object
+            KrtIRValue* unpin_args = (KrtIRValue*)KRT_MALLOC(1 * sizeof(KrtIRValue));
+            if (unpin_args) {
+                unpin_args[0] = fixed_expr;
+                KrtIrCall(builder, "KrtUnpinObject", unpin_args, 1);
+                KRT_FREE(unpin_args);
+            }
+            break;
+        }
+
+        case AST_ASYNC_FUNCTION: {
+            // Async function declaration
+            // Create a state machine function for async
+            static int async_counter = 0;
+            char async_state_name[256];
+            snprintf(async_state_name, sizeof(async_state_name), "__async_state_%d", async_counter++);
+            
+            // Create the async state machine function
+            KrtIRParam* params = NULL;
+            int param_count = stmt->data.function_decl.parameter_count;
+            if (param_count > 0) {
+                params = (KrtIRParam*)KRT_MALLOC(param_count * sizeof(KrtIRParam));
+                if (params) {
+                    for (int i = 0; i < param_count; i++) {
+                        params[i].name = stmt->data.function_decl.parameters[i];
+                        params[i].type = stmt->data.function_decl.parameter_types[i];
+                    }
+                }
+            }
+            
+            // Create async state machine function
+            KrtIRFunction* async_func = KrtIrFunctionCreate(builder, async_state_name, params, param_count, 
+                                                             stmt->data.function_decl.return_type);
+            
+            KrtIRFunction* saved_func = builder->current_function;
+            KrtIRBasicBlock* saved_block = builder->current_block;
+            
+            builder->current_function = async_func;
+            KrtIRBasicBlock* entry_block = KrtIrBlockCreate(builder, "entry");
+            KrtIrBlockSetCurrent(builder, entry_block);
+            
+            // Generate body
+            if (stmt->data.function_decl.body) {
+                KrtIrGenerateBlock(builder, stmt->data.function_decl.body);
+            }
+            
+            // Ensure return
+            if (!KrtIrCheckHasReturn(stmt->data.function_decl.body)) {
+                KrtIrReturn(builder, KrtIrImm(builder, 0));
+            }
+            
+            builder->current_function = saved_func;
+            builder->current_block = saved_block;
+            
+            if (params) KRT_FREE(params);
+            break;
+        }
+
+        case AST_USING_STATEMENT: {
+            KrtIRValue resource = KrtIrGenerateExpression(builder, stmt->data.using_stmt.resource);
+            KrtIrGenerateStatement(builder, stmt->data.using_stmt.body);
+            KrtIRValue* dispose_args = (KrtIRValue*)KRT_MALLOC(sizeof(KrtIRValue));
+            if (dispose_args) {
+                dispose_args[0] = resource;
+                KrtIrCall(builder, "Dispose", dispose_args, 1);
+                KRT_FREE(dispose_args);
+            }
+            break;
+        }
+
+        case AST_YIELD_RETURN: {
+            KrtIRValue value = KrtIrGenerateExpression(builder, stmt->data.yield_return.value);
+            (void)value;
+            break;
+        }
+
+        case AST_YIELD_BREAK: {
+            break;
+        }
+
+        case AST_THROW_STATEMENT: {
+            if (stmt->data.throw_stmt.is_rethrow) {
+                // Rethrow the current exception
+                KrtIrCall(builder, "KrtRethrowException", NULL, 0);
+            } else if (stmt->data.throw_stmt.exception_expr) {
+                // Throw a new exception - generate IR for the exception expression
+                // For now, just call the throw function with a placeholder
+                KrtIrCall(builder, "KrtThrowException", NULL, 0);
+            }
+            break;
+        }
+
+        case AST_TRY_STATEMENT: {
+            // Generate try block
+            if (stmt->data.try_stmt.try_block) {
+                KrtIrGenerateBlock(builder, stmt->data.try_stmt.try_block);
+            }
+            
+            // Generate catch clauses
+            if (stmt->data.try_stmt.catch_clauses) {
+                for (int i = 0; i < stmt->data.try_stmt.catch_clause_count; i++) {
+                    ASTNode* catch_clause = stmt->data.try_stmt.catch_clauses[i];
+                    if (catch_clause) {
+                        // Generate catch block
+                        if (catch_clause->data.catch_clause.catch_block) {
+                            KrtIrGenerateBlock(builder, catch_clause->data.catch_clause.catch_block);
+                        }
+                    }
+                }
+            }
+            
+            // Generate finally block
+            if (stmt->data.try_stmt.finally_clause) {
+                KrtIrGenerateBlock(builder, stmt->data.try_stmt.finally_clause);
+            }
+            break;
+        }
+
+        case AST_OPERATOR_OVERLOAD: {
+            if (!stmt->data.operator_overload.body) {
+                break;
+            }
+            
+            KrtIRParam* params = NULL;
+            int param_count = 2;
+            params = (KrtIRParam*)KRT_MALLOC(param_count * sizeof(KrtIRParam));
+            if (params) {
+                params[0].name = "left";
+                params[0].type = TOKEN_IDENTIFIER;
+                params[1].name = "right";
+                params[1].type = TOKEN_IDENTIFIER;
+            }
+            
+            const char* op_name = stmt->data.operator_overload.operator_name;
+            if (!op_name) {
+                switch (stmt->data.operator_overload.operator_type) {
+                    case TOKEN_OP_ADDITION: op_name = "op_Addition"; break;
+                    case TOKEN_OP_SUBTRACTION: op_name = "op_Subtraction"; break;
+                    case TOKEN_OP_MULTIPLY: op_name = "op_Multiply"; break;
+                    case TOKEN_OP_DIVISION: op_name = "op_Division"; break;
+                    case TOKEN_OP_MODULO: op_name = "op_Modulo"; break;
+                    case TOKEN_OP_EQUALITY: op_name = "op_Equality"; break;
+                    case TOKEN_OP_INEQUALITY: op_name = "op_Inequality"; break;
+                    case TOKEN_OP_LESS: op_name = "op_LessThan"; break;
+                    case TOKEN_OP_GREATER: op_name = "op_GreaterThan"; break;
+                    case TOKEN_OP_LESS_EQUAL: op_name = "op_LessThanOrEqual"; break;
+                    case TOKEN_OP_GREATER_EQUAL: op_name = "op_GreaterThanOrEqual"; break;
+                    case TOKEN_OP_BITWISE_AND: op_name = "op_BitwiseAnd"; break;
+                    case TOKEN_OP_BITWISE_OR: op_name = "op_BitwiseOr"; break;
+                    case TOKEN_OP_BITWISE_XOR: op_name = "op_BitwiseXor"; break;
+                    case TOKEN_OP_LEFT_SHIFT: op_name = "op_LeftShift"; break;
+                    case TOKEN_OP_RIGHT_SHIFT: op_name = "op_RightShift"; break;
+                    default: op_name = "op_Unknown"; break;
+                }
+            }
+            
+            KrtIRFunction* func = KrtIrFunctionCreate(builder, op_name, params, param_count, TOKEN_IDENTIFIER);
+            KrtIRFunction* saved_function = builder->current_function;
+            builder->current_function = func;
+            
+            KrtIrFunctionSetEntry(builder, func);
+            if (params) {
+                KRT_FREE(params);
+            }
+            
+            KrtIRBasicBlock* entry_block = func->entry_block;
+            if (!entry_block || entry_block->first_inst != NULL || entry_block->next != NULL) {
+                entry_block = KrtIrBlockCreate(builder, "entry");
+                KrtIrBlockSetCurrent(builder, entry_block);
+            } else {
+                builder->current_block = entry_block;
+            }
+            KrtIrGenerateBlock(builder, stmt->data.operator_overload.body);
+            int has_return = KrtIrCheckHasReturn(stmt->data.operator_overload.body);
+            if (!has_return) {
+                KrtIrReturn(builder, KrtIrImm(builder, 0));
+            }
+            builder->current_function = saved_function;
+            break;
+        }
+
         case AST_VARIABLE_DECLARATION: {
             if (builder->type_context && builder->type_context->current_scope) {
                 TypeCheckSymbol symbol = {0};
@@ -1893,7 +2892,15 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             char* mangled_name = NULL;
             const char* global_name = base_name;
             if (current_class) {
-                mangled_name = KrtIrMangleStaticMember(current_class, base_name);
+                // Check if we are in a generic context
+                if (g_generic_context.type_arg_count > 0 && g_generic_context.type_args) {
+                    // Use generic mangling to create unique storage per type instantiation
+                    const char** type_args = (const char**)g_generic_context.type_args;
+                    mangled_name = KrtIrMangleGenericStaticMember(current_class, base_name, 
+                                                                   type_args, g_generic_context.type_arg_count);
+                } else {
+                    mangled_name = KrtIrMangleStaticMember(current_class, base_name);
+                }
                 if (mangled_name) {
                     global_name = mangled_name;
                 }
@@ -1936,12 +2943,19 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             }
             
             KrtIRParam* params = NULL;
-            if (stmt->data.function_decl.parameter_count > 0) {
-                params = (KrtIRParam*)KRT_MALLOC(stmt->data.function_decl.parameter_count * sizeof(KrtIRParam));
+            int actual_param_count = stmt->data.function_decl.parameter_count;
+            if (actual_param_count > 0) {
+                params = (KrtIRParam*)KRT_MALLOC(actual_param_count * sizeof(KrtIRParam));
                 if (params) {
-                    for (int i = 0; i < stmt->data.function_decl.parameter_count; i++) {
+                    for (int i = 0; i < actual_param_count; i++) {
                         params[i].name = stmt->data.function_decl.parameters[i];
                         params[i].type = stmt->data.function_decl.parameter_types[i];
+                        if (stmt->data.function_decl.parameter_is_params && 
+                            stmt->data.function_decl.parameter_is_params[i]) {
+                            params[i].is_params = 1;
+                        } else {
+                            params[i].is_params = 0;
+                        }
                     }
                 }
             }
@@ -1999,7 +3013,55 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             if (!stmt->data.class_decl.name) {
                 break;
             }
+            
+            // Handle generic constraints if present
+            ASTNode** constraints = stmt->data.class_decl.constraints;
+            int constraint_count = stmt->data.class_decl.constraint_count;
+            
+            if (constraint_count > 0 && constraints) {
+                // Generate runtime type checks for generic constraints
+                for (int i = 0; i < constraint_count; i++) {
+                    ASTNode* constraint = constraints[i];
+                    if (!constraint || constraint->type != AST_GENERIC_CONSTRAINT) continue;
+                    
+                    const char* param_name = constraint->data.generic_constraint.param_name;
+                    const char* constraint_type = constraint->data.generic_constraint.constraint_type;
+                    
+                    if (param_name && constraint_type) {
+                        // Generate a runtime check for the constraint
+                        // This will be called when the generic type is instantiated
+                        char check_func_name[128];
+                        snprintf(check_func_name, sizeof(check_func_name), 
+                                 "__check_constraint_%s_%s_%s", 
+                                 stmt->data.class_decl.name, param_name, constraint_type);
+                        
+                        // Create constraint check function
+                        KrtIRFunction* check_func = KrtIrFunctionCreate(
+                            builder, check_func_name, NULL, 0, TOKEN_VOID);
+                        KrtIrFunctionSetEntry(builder, check_func);
+                        
+                        KrtIRBasicBlock* entry = KrtIrBlockCreate(builder, "entry");
+                        KrtIrBlockSetCurrent(builder, entry);
+                        
+                        // Generate constraint check based on type
+                        if (strcmp(constraint_type, "class") == 0) {
+                            // Check if type is a reference type (not value type)
+                            // For now, emit a comment indicating the check
+                            // In full implementation, this would check type metadata
+                        } else if (strcmp(constraint_type, "struct") == 0) {
+                            // Check if type is a value type
+                        } else {
+                            // Check if type implements interface or inherits from class
+                            // This would involve checking the type hierarchy
+                        }
+                        
+                        KrtIrReturn(builder, KrtIrImm(builder, 0));
+                    }
+                }
+            }
+            
             KrtIrPushClassContext(builder, stmt->data.class_decl.name);
+            KrtIrRegisterClassLayout(builder, stmt->data.class_decl.name, stmt->data.class_decl.body);
             ASTNode* body = stmt->data.class_decl.body;
             if (body) {
                 if (body->type == AST_BLOCK) {
@@ -2026,7 +3088,7 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
                                     }
                                 }
                             }
-                            char* mangled = KrtIrMangleStaticMember(stmt->data.class_decl.name, "constructor");
+                            char* mangled = name_mangle_constructor(stmt->data.class_decl.name, pc);
                             KrtIRFunction* func = KrtIrFunctionCreate(builder, mangled, params, pc + 1, TOKEN_VOID);
                             KrtIrFunctionSetEntry(builder, func);
                             if (params) {
@@ -2038,6 +3100,25 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
                                 KrtIrBlockSetCurrent(builder, entry_block);
                             } else {
                                 builder->current_block = entry_block;
+                            }
+                            if (stmt->data.class_decl.base_class &&
+                                stmt->data.class_decl.base_class->type == AST_IDENTIFIER &&
+                                member->data.constructor_decl.has_base_call) {
+                                const char* base_class_name = stmt->data.class_decl.base_class->data.identifier_name;
+                                int base_argc = member->data.constructor_decl.base_argument_count;
+                                KrtIRValue* cargs = (KrtIRValue*)KRT_MALLOC((base_argc + 1) * sizeof(KrtIRValue));
+                                if (cargs) {
+                                    cargs[0] = KrtIrArg(builder, 0);
+                                    for (int i = 0; i < base_argc; i++) {
+                                        cargs[i + 1] = KrtIrGenerateExpression(builder, member->data.constructor_decl.base_arguments[i]);
+                                    }
+                                    char* base_ctor = name_mangle_constructor(base_class_name, base_argc);
+                                    if (base_ctor) {
+                                        KrtIrCall(builder, base_ctor, cargs, base_argc + 1);
+                                        KRT_FREE(base_ctor);
+                                    }
+                                    KRT_FREE(cargs);
+                                }
                             }
                             KrtIrGenerateBlock(builder, member->data.constructor_decl.body);
                             KrtIrReturn(builder, KrtIrImm(builder, 0));
@@ -2079,7 +3160,8 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
                                 }
                             }
                             const char* base_name = member->data.function_decl.name;
-                            char* mangled = KrtIrMangleStaticMember(stmt->data.class_decl.name, base_name);
+                            char* mangled = KrtIrMangleClassMethodName(stmt->data.class_decl.name, base_name,
+                                                                       member->data.function_decl.parameter_types, pc);
                             KrtIRFunction* func = KrtIrFunctionCreate(builder, mangled, params, pc + 1, member->data.function_decl.return_type);
                             KrtIrFunctionSetEntry(builder, func);
                             if (params) {
@@ -2102,6 +3184,66 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
                             KrtIrGenerateStatement(builder, member);
                         } else if (member->type == AST_CLASS_DECLARATION) {
                             KrtIrGenerateStatement(builder, member);
+                        } else if (member->type == AST_PROPERTY_DECLARATION) {
+                            if (member->data.property_decl.is_auto_property) {
+                                const char* class_name = stmt->data.class_decl.name;
+                                const char* prop_name = member->data.property_decl.name;
+                                const char* field_name = member->data.property_decl.backing_field_name;
+                                KrtTokenType prop_type = member->data.property_decl.type;
+                                
+                                if (member->data.property_decl.getter) {
+                                    KrtIRParam* params = (KrtIRParam*)KRT_MALLOC(sizeof(KrtIRParam));
+                                    if (params) {
+                                        params[0].name = "this";
+                                        params[0].type = TOKEN_UINT64;
+                                        
+                                        char getter_name[256];
+                                        snprintf(getter_name, sizeof(getter_name), "%s_get_%s", class_name, prop_name);
+                                        
+                                        KrtIRFunction* func = KrtIrFunctionCreate(builder, getter_name, params, 1, prop_type);
+                                        KrtIrFunctionSetEntry(builder, func);
+                                        
+                                        KrtIRBasicBlock* entry_block = KrtIrBlockCreate(builder, "entry");
+                                        KrtIrBlockSetCurrent(builder, entry_block);
+                                        
+                                        if (field_name) {
+                                            KrtIRValue field_val = KrtIrLoad(builder, field_name);
+                                            KrtIrReturn(builder, field_val);
+                                        } else {
+                                            KrtIrReturn(builder, KrtIrImm(builder, 0));
+                                        }
+                                        
+                                        KRT_FREE(params);
+                                    }
+                                }
+                                
+                                if (member->data.property_decl.setter) {
+                                    KrtIRParam* params = (KrtIRParam*)KRT_MALLOC(2 * sizeof(KrtIRParam));
+                                    if (params) {
+                                        params[0].name = "this";
+                                        params[0].type = TOKEN_UINT64;
+                                        params[1].name = "value";
+                                        params[1].type = prop_type;
+                                        
+                                        char setter_name[256];
+                                        snprintf(setter_name, sizeof(setter_name), "%s_set_%s", class_name, prop_name);
+                                        
+                                        KrtIRFunction* func = KrtIrFunctionCreate(builder, setter_name, params, 2, TOKEN_VOID);
+                                        KrtIrFunctionSetEntry(builder, func);
+                                        
+                                        KrtIRBasicBlock* entry_block = KrtIrBlockCreate(builder, "entry");
+                                        KrtIrBlockSetCurrent(builder, entry_block);
+                                        
+                                        if (field_name) {
+                                            KrtIRValue value_val = KrtIrArg(builder, 1);
+                                            KrtIrStore(builder, field_name, value_val);
+                                        }
+                                        KrtIrReturn(builder, KrtIrImm(builder, 0));
+                                        
+                                        KRT_FREE(params);
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
@@ -2115,10 +3257,69 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
 
                     } else if (member && member->type == AST_STATIC_VARIABLE_DECLARATION) {
                         KrtIrGenerateStatement(builder, member);
+                    } else if (member && member->type == AST_PROPERTY_DECLARATION) {
+                        if (member->data.property_decl.is_auto_property) {
+                            const char* class_name = stmt->data.class_decl.name;
+                            const char* prop_name = member->data.property_decl.name;
+                            const char* field_name = member->data.property_decl.backing_field_name;
+                            KrtTokenType prop_type = member->data.property_decl.type;
+                            
+                            if (member->data.property_decl.getter) {
+                                KrtIRParam* params = (KrtIRParam*)KRT_MALLOC(sizeof(KrtIRParam));
+                                if (params) {
+                                    params[0].name = "this";
+                                    params[0].type = TOKEN_UINT64;
+                                    
+                                    char getter_name[256];
+                                    snprintf(getter_name, sizeof(getter_name), "%s_get_%s", class_name, prop_name);
+                                    
+                                    KrtIRFunction* func = KrtIrFunctionCreate(builder, getter_name, params, 1, prop_type);
+                                    KrtIrFunctionSetEntry(builder, func);
+                                    
+                                    KrtIRBasicBlock* entry_block = KrtIrBlockCreate(builder, "entry");
+                                    KrtIrBlockSetCurrent(builder, entry_block);
+                                    
+                                    if (field_name) {
+                                        KrtIRValue field_val = KrtIrLoad(builder, field_name);
+                                        KrtIrReturn(builder, field_val);
+                                    } else {
+                                        KrtIrReturn(builder, KrtIrImm(builder, 0));
+                                    }
+                                    
+                                    KRT_FREE(params);
+                                }
+                            }
+                            
+                            if (member->data.property_decl.setter) {
+                                KrtIRParam* params = (KrtIRParam*)KRT_MALLOC(2 * sizeof(KrtIRParam));
+                                if (params) {
+                                    params[0].name = "this";
+                                    params[0].type = TOKEN_UINT64;
+                                    params[1].name = "value";
+                                    params[1].type = prop_type;
+                                    
+                                    char setter_name[256];
+                                    snprintf(setter_name, sizeof(setter_name), "%s_set_%s", class_name, prop_name);
+                                    
+                                    KrtIRFunction* func = KrtIrFunctionCreate(builder, setter_name, params, 2, TOKEN_VOID);
+                                    KrtIrFunctionSetEntry(builder, func);
+                                    
+                                    KrtIRBasicBlock* entry_block = KrtIrBlockCreate(builder, "entry");
+                                    KrtIrBlockSetCurrent(builder, entry_block);
+                                    
+                                    if (field_name) {
+                                        KrtIRValue value_val = KrtIrArg(builder, 1);
+                                        KrtIrStore(builder, field_name, value_val);
+                                    }
+                                    KrtIrReturn(builder, KrtIrImm(builder, 0));
+                                    
+                                    KRT_FREE(params);
+                                }
+                            }
+                        }
                     }
                 }
             }
-            KrtIrRegisterClassLayout(builder, stmt->data.class_decl.name, stmt->data.class_decl.body);
             KrtIrPopClassContext(builder);
             break;
         }
@@ -2165,7 +3366,9 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             char* mangled_name = NULL;
             const char* function_name = base_name;
             if (current_class) {
-                mangled_name = KrtIrMangleStaticMember(current_class, base_name);
+                mangled_name = KrtIrMangleClassMethodName(current_class, base_name,
+                                                           stmt->data.static_function_decl.parameter_types,
+                                                           stmt->data.static_function_decl.parameter_count);
                 if (mangled_name) {
                     function_name = mangled_name;
                 }

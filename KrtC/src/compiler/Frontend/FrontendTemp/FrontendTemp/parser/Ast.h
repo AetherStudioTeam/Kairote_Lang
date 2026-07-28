@@ -46,6 +46,7 @@ typedef enum {
 
     AST_TEMPLATE_DECLARATION,
     AST_TEMPLATE_PARAMETER,
+    AST_TEMPLATE_INSTANTIATION,
     AST_GENERIC_TYPE,
     AST_GENERIC_CONSTRAINT,
 
@@ -76,9 +77,43 @@ typedef enum {
     AST_LINQ_SELECT,             
     AST_LINQ_ORDERBY,            
     AST_LINQ_JOIN,               
+    AST_LINQ_LET,                
+    AST_LINQ_GROUP,              
     AST_ATTRIBUTE,               
     AST_ATTRIBUTE_LIST,
-    AST_UNSAFE_CALL
+    AST_UNSAFE_CALL,
+    AST_DEFAULT_EXPRESSION,
+    AST_IS_EXPRESSION,
+    AST_AS_EXPRESSION,
+    AST_SIZEOF_EXPRESSION,
+    AST_STACKALLOC_EXPRESSION,
+    AST_INTERPOLATED_STRING,
+    AST_TUPLE_TYPE,
+    AST_TUPLE_EXPRESSION,
+    AST_TUPLE_ELEMENT_ACCESS,
+    AST_MATCH_EXPRESSION,
+    AST_PATTERN_CASE,
+    AST_PATTERN_WILDCARD,
+    AST_PATTERN_LITERAL,
+    AST_PATTERN_VARIABLE,
+    AST_PATTERN_TUPLE,
+    AST_POINTER_TYPE,
+    AST_POINTER_DEREFERENCE,
+    AST_ADDRESS_OF,
+    AST_FIXED_STATEMENT,
+    AST_YIELD_RETURN,
+    AST_YIELD_BREAK,
+    AST_ASYNC_FUNCTION,
+    AST_AWAIT_EXPRESSION,
+    AST_LOCK_STATEMENT,
+    AST_OPERATOR_OVERLOAD,
+    AST_DELEGATE_DECLARATION,
+    AST_DELEGATE_TYPE,
+    AST_NULLABLE_TYPE,
+    AST_NULL_COALESCING,
+    AST_NULL_CONDITIONAL,
+    AST_CAST_EXPRESSION,
+    AST_NULL
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -95,14 +130,23 @@ typedef struct ASTNode {
             char** parameters;
             int parameter_count;
             KrtTokenType* parameter_types;
+            int* parameter_is_params;
+            int* parameter_is_nullable;
+            int* parameter_is_array;
+            struct ASTNode** parameter_default_values;
             struct ASTNode* body;
             KrtTokenType return_type;
+            int is_async;
         } function_decl;
         struct {
             char* name;
             char** parameters;
             int parameter_count;
             KrtTokenType* parameter_types;
+            int* parameter_is_params;
+            int* parameter_is_nullable;
+            int* parameter_is_array;
+            struct ASTNode** parameter_default_values;
             struct ASTNode* body;
             KrtTokenType return_type;
         } static_function_decl;
@@ -113,7 +157,8 @@ typedef struct ASTNode {
             struct ASTNode* array_size;
             int is_array;
             int is_let;  
-            char* template_instantiation_type;  
+            char* template_instantiation_type;
+            int is_nullable;
         } variable_decl;
         struct {
             char* name;
@@ -190,6 +235,7 @@ typedef struct ASTNode {
             char** argument_names;
             struct ASTNode* object;
             char* resolved_class_name;
+            char* resolved_mangled_name;
         } call;
         struct {
             struct ASTNode** statements;
@@ -200,6 +246,7 @@ typedef struct ASTNode {
             char* method_name;
             struct ASTNode** arguments;
             int argument_count;
+            char* resolved_mangled_name;
         } static_call;
         struct {
             struct ASTNode* array;
@@ -239,16 +286,21 @@ typedef struct ASTNode {
             struct ASTNode* object;
             char* member_name;
             char* resolved_class_name;
+            char* resolved_mangled_name;
         } member_access;
         struct {
             KrtTokenType access_modifier;
             struct ASTNode* member;
+            int is_virtual;
         } access_modifier;
         struct {
             char** parameters;
             int parameter_count;
             KrtTokenType* parameter_types;
             struct ASTNode* body;
+            struct ASTNode** base_arguments;
+            int base_argument_count;
+            int has_base_call;
         } constructor_decl;
         struct {
             char* class_name;
@@ -271,6 +323,7 @@ typedef struct ASTNode {
         } finally_clause;
         struct {
             struct ASTNode* exception_expr;
+            int is_rethrow;
         } throw_stmt;
 
         struct {
@@ -283,6 +336,13 @@ typedef struct ASTNode {
         struct {
             char* param_name;
         } template_param;
+        struct {
+            char* name;
+            char** type_args;
+            int type_arg_count;
+            struct ASTNode** args;
+            int arg_count;
+        } template_instantiation;
         struct {
             char* type_name;
         } generic_type;
@@ -345,13 +405,17 @@ typedef struct ASTNode {
             struct ASTNode* initial_value;
             struct ASTNode** attributes;
             int attribute_count;
+            char* backing_field_name;
+            int is_auto_property;
         } property_decl;
         struct {
             struct ASTNode* body;
+            int is_auto;
         } property_getter;
         struct {
             char* value_param_name;  
             struct ASTNode* body;
+            int is_auto;
         } property_setter;
         struct {
             char** parameters;
@@ -392,6 +456,15 @@ typedef struct ASTNode {
             char* into_var_name;  
         } linq_join;
         struct {
+            char* var_name;
+            struct ASTNode* expression;
+        } linq_let;
+        struct {
+            struct ASTNode* key_expression;
+            struct ASTNode* element_expression;
+            char* into_var_name;
+        } linq_group;
+        struct {
             char* name;
             struct ASTNode** arguments;
             int argument_count;
@@ -408,6 +481,125 @@ typedef struct ASTNode {
             int permission_count;
             int is_block;             
         } unsafe_call;
+        struct {
+            char* type_name;
+            struct ASTNode* type_expr;
+        } default_expr;
+        struct {
+            struct ASTNode* expression;
+            char* type_name;
+            struct ASTNode* type_expr;
+        } is_expr;
+        struct {
+            struct ASTNode* expression;
+            char* type_name;
+            struct ASTNode* type_expr;
+        } as_expr;
+        struct {
+            KrtTokenType type_token;
+            char* type_name;
+        } sizeof_expr;
+        struct {
+            KrtTokenType type_token;
+            char* type_name;
+            struct ASTNode* count_expr;
+        } stackalloc_expr;
+        struct {
+            char** string_parts;
+            int part_count;
+            struct ASTNode** expressions;
+            int expression_count;
+        } interpolated_string;
+        struct {
+            KrtTokenType* element_types;
+            int element_count;
+        } tuple_type;
+        struct {
+            struct ASTNode** elements;
+            int element_count;
+        } tuple_expr;
+        struct {
+            struct ASTNode* tuple;
+            int index;
+        } tuple_element_access;
+        struct {
+            struct ASTNode* expression;
+            struct ASTNode** cases;
+            int case_count;
+        } match_expr;
+        struct {
+            struct ASTNode* pattern;
+            struct ASTNode* when_clause;
+            struct ASTNode* body;
+        } pattern_case;
+        struct {
+            // Wildcard pattern: _
+        } pattern_wildcard;
+        struct {
+            struct ASTNode* value;
+        } pattern_literal;
+        struct {
+            char* name;
+        } pattern_variable;
+        struct {
+            struct ASTNode** elements;
+            int element_count;
+        } pattern_tuple;
+        struct {
+            KrtTokenType base_type;
+            int pointer_level;  // 1 for *, 2 for **, etc.
+        } pointer_type;
+        struct {
+            struct ASTNode* pointer;
+        } pointer_deref;
+        struct {
+            struct ASTNode* operand;
+        } address_of;
+        struct {
+            char* variable_name;
+            struct ASTNode* expression;
+            struct ASTNode* body;
+        } fixed_statement;
+        struct {
+            struct ASTNode* value;
+        } yield_return;
+        struct {
+            struct ASTNode* expression;
+        } await_expr;
+        struct {
+            struct ASTNode* lock_object;
+            struct ASTNode* body;
+        } lock_stmt;
+        struct {
+            KrtTokenType operator_type;
+            char* operator_name;
+            struct ASTNode* body;
+        } operator_overload;
+        struct {
+            char* name;
+            KrtTokenType return_type;
+            char** parameters;
+            KrtTokenType* parameter_types;
+            int parameter_count;
+        } delegate_decl;
+        struct {
+            KrtTokenType base_type;
+            struct ASTNode* type_expr;
+        } nullable_type;
+        struct {
+            struct ASTNode* left;
+            struct ASTNode* right;
+        } null_coalescing;
+        struct {
+            struct ASTNode* expression;
+            char* member_name;
+            struct ASTNode* arguments;
+            int is_method_call;
+        } null_conditional;
+        struct {
+            KrtTokenType target_type;
+            struct ASTNode* expression;
+        } cast_expr;
     } data;
     int is_arena_allocated;  
 } ASTNode;

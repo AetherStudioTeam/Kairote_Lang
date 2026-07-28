@@ -1,6 +1,6 @@
 #include "SmartPtr.h"
 #include "../Utils/KrtCommon.h"
-#include "../Utils/logger.h"
+#include "../Utils/Logger.h"
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
@@ -205,7 +205,7 @@ void KrtPtrDestroy(SmartPtr* ptr) {
     KRT_FREE(ptr);
 }
 
-void KrtPtrReset(SmartPtr* ptr, void* new_ptr, size_t size) {
+void KrtPtrReset(SmartPtr* ptr, void* new_ptr, size_t size __attribute__((unused))) {
     if (!ptr) return;
     
     KrtPtrCleanupInternal(ptr);

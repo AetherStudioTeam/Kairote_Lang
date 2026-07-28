@@ -35,6 +35,7 @@ typedef struct SymbolEntry {
     bool is_entry_point;
     bool is_array;
     struct SymbolTable* nested_table;
+    KrtTokenType value_type;
 } SymbolEntry;
 
 typedef struct SymbolScope {
@@ -54,6 +55,8 @@ typedef struct SymbolTable {
     SymbolEntry** forward_refs;
     int forward_ref_count;
     int forward_ref_capacity;
+
+    struct SymbolTable* parent_table;
 } SymbolTable;
 
 typedef void (*ForwardRefCallback)(SymbolEntry* symbol, void* context);

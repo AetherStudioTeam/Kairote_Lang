@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 void* KrtMemcpy(void* dest, const void* src, size_t n);
 void* KrtMemset(void* s, int c, size_t n);

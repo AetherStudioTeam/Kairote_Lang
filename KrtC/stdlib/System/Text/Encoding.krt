@@ -1,0 +1,576 @@
+namespace System.Text
+
+public abstract class Encoding
+{
+    public static var UTF8: Encoding = new UTF8Encoding()
+    public static var Unicode: Encoding = new UnicodeEncoding()
+    public static var BigEndianUnicode: Encoding = new BigEndianUnicodeEncoding()
+    public static var ASCII: Encoding = new ASCIIEncoding()
+    public static var Default: Encoding = UTF8
+
+    public abstract function GetByteCount(chars: char[], index: int32, count: int32): int32
+    public abstract function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32): int32
+    public abstract function GetCharCount(bytes: uint8[], index: int32, count: int32): int32
+    public abstract function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32): int32
+    public abstract function GetMaxByteCount(charCount: int32): int32
+    public abstract function GetMaxCharCount(byteCount: int32): int32
+    public abstract function GetEncoder(): Encoder
+    public abstract function GetDecoder(): Decoder
+    public abstract function GetPreamble(): uint8[]
+
+    public function GetByteCount(chars: char[]): int32
+    {
+        if chars == null
+        {
+            throw new ArgumentNullException("chars")
+        }
+        return this.GetByteCount(chars, 0, chars.Length)
+    }
+
+    public function GetByteCount(s: string): int32
+    {
+        if s == null
+        {
+            throw new ArgumentNullException("s")
+        }
+        var chars = new char[s.Length()]
+        for var i = 0; i < s.Length(); i = i + 1
+        {
+            chars[i] = s.get_Chars(i)
+        }
+        return this.GetByteCount(chars, 0, chars.Length)
+    }
+
+    public function GetBytes(chars: char[]): uint8[]
+    {
+        if chars == null
+        {
+            throw new ArgumentNullException("chars")
+        }
+        var byteCount = this.GetByteCount(chars, 0, chars.Length)
+        var bytes = new uint8[byteCount]
+        this.GetBytes(chars, 0, chars.Length, bytes, 0)
+        return bytes
+    }
+
+    public function GetBytes(s: string): uint8[]
+    {
+        if s == null
+        {
+            throw new ArgumentNullException("s")
+        }
+        var chars = new char[s.Length()]
+        for var i = 0; i < s.Length(); i = i + 1
+        {
+            chars[i] = s.get_Chars(i)
+        }
+        return this.GetBytes(chars)
+    }
+
+    public function GetChars(bytes: uint8[]): char[]
+    {
+        if bytes == null
+        {
+            throw new ArgumentNullException("bytes")
+        }
+        var charCount = this.GetCharCount(bytes, 0, bytes.Length)
+        var chars = new char[charCount]
+        this.GetChars(bytes, 0, bytes.Length, chars, 0)
+        return chars
+    }
+
+    public function GetString(bytes: uint8[]): string
+    {
+        if bytes == null
+        {
+            throw new ArgumentNullException("bytes")
+        }
+        var chars = this.GetChars(bytes, 0, bytes.Length)
+        return new String(chars)
+    }
+
+    public function GetString(bytes: uint8[], index: int32, count: int32): string
+    {
+        if bytes == null
+        {
+            throw new ArgumentNullException("bytes")
+        }
+        var chars = this.GetChars(bytes, index, count)
+        return new String(chars)
+    }
+
+    public static function GetEncoding(codePage: int32): Encoding
+    {
+        if codePage == 65001
+        {
+            return UTF8
+        }
+        if codePage == 1200
+        {
+            return Unicode
+        }
+        if codePage == 1201
+        {
+            return BigEndianUnicode
+        }
+        if codePage == 20127
+        {
+            return ASCII
+        }
+        throw new NotSupportedException("Code page not supported")
+    }
+}
+
+public class UTF8Encoding : Encoding
+{
+    public function GetByteCount(chars: char[], index: int32, count: int32): int32
+    {
+        var byteCount = 0
+        for var i = 0; i < count; i = i + 1
+        {
+            var c = chars[index + i]
+            var code = int32(c)
+            if code < 0x80
+            {
+                byteCount = byteCount + 1
+            }
+            else if code < 0x800
+            {
+                byteCount = byteCount + 2
+            }
+            else if code < 0x10000
+            {
+                byteCount = byteCount + 3
+            }
+            else
+            {
+                byteCount = byteCount + 4
+            }
+        }
+        return byteCount
+    }
+
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32): int32
+    {
+        var bytePos = byteIndex
+        for var i = 0; i < charCount; i = i + 1
+        {
+            var c = chars[charIndex + i]
+            var code = int32(c)
+            if code < 0x80
+            {
+                bytes[bytePos] = uint8(code)
+                bytePos = bytePos + 1
+            }
+            else if code < 0x800
+            {
+                bytes[bytePos] = uint8(0xC0 | (code >> 6))
+                bytes[bytePos + 1] = uint8(0x80 | (code & 0x3F))
+                bytePos = bytePos + 2
+            }
+            else if code < 0x10000
+            {
+                bytes[bytePos] = uint8(0xE0 | (code >> 12))
+                bytes[bytePos + 1] = uint8(0x80 | ((code >> 6) & 0x3F))
+                bytes[bytePos + 2] = uint8(0x80 | (code & 0x3F))
+                bytePos = bytePos + 3
+            }
+            else
+            {
+                bytes[bytePos] = uint8(0xF0 | (code >> 18))
+                bytes[bytePos + 1] = uint8(0x80 | ((code >> 12) & 0x3F))
+                bytes[bytePos + 2] = uint8(0x80 | ((code >> 6) & 0x3F))
+                bytes[bytePos + 3] = uint8(0x80 | (code & 0x3F))
+                bytePos = bytePos + 4
+            }
+        }
+        return bytePos - byteIndex
+    }
+
+    public function GetCharCount(bytes: uint8[], index: int32, count: int32): int32
+    {
+        var charCount = 0
+        var i = 0
+        while i < count
+        {
+            var b = bytes[index + i]
+            if (b & 0x80) == 0
+            {
+                i = i + 1
+            }
+            else if (b & 0xE0) == 0xC0
+            {
+                i = i + 2
+            }
+            else if (b & 0xF0) == 0xE0
+            {
+                i = i + 3
+            }
+            else
+            {
+                i = i + 4
+            }
+            charCount = charCount + 1
+        }
+        return charCount
+    }
+
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32): int32
+    {
+        var charPos = charIndex
+        var i = 0
+        while i < byteCount
+        {
+            var b = bytes[byteIndex + i]
+            var code = 0
+            if (b & 0x80) == 0
+            {
+                code = int32(b)
+                i = i + 1
+            }
+            else if (b & 0xE0) == 0xC0
+            {
+                code = int32(b & 0x1F) << 6
+                code = code | int32(bytes[byteIndex + i + 1] & 0x3F)
+                i = i + 2
+            }
+            else if (b & 0xF0) == 0xE0
+            {
+                code = int32(b & 0x0F) << 12
+                code = code | (int32(bytes[byteIndex + i + 1] & 0x3F) << 6)
+                code = code | int32(bytes[byteIndex + i + 2] & 0x3F)
+                i = i + 3
+            }
+            else
+            {
+                code = int32(b & 0x07) << 18
+                code = code | (int32(bytes[byteIndex + i + 1] & 0x3F) << 12)
+                code = code | (int32(bytes[byteIndex + i + 2] & 0x3F) << 6)
+                code = code | int32(bytes[byteIndex + i + 3] & 0x3F)
+                i = i + 4
+            }
+            chars[charPos] = char(code)
+            charPos = charPos + 1
+        }
+        return charPos - charIndex
+    }
+
+    public function GetMaxByteCount(charCount: int32): int32
+    {
+        return charCount * 4
+    }
+
+    public function GetMaxCharCount(byteCount: int32): int32
+    {
+        return byteCount
+    }
+
+    public function GetEncoder(): Encoder
+    {
+        return new UTF8Encoder()
+    }
+
+    public function GetDecoder(): Decoder
+    {
+        return new UTF8Decoder()
+    }
+
+    public function GetPreamble(): uint8[]
+    {
+        return [0xEF, 0xBB, 0xBF]
+    }
+}
+
+public class UnicodeEncoding : Encoding
+{
+    public function GetByteCount(chars: char[], index: int32, count: int32): int32
+    {
+        return count * 2
+    }
+
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32): int32
+    {
+        var bytePos = byteIndex
+        for var i = 0; i < charCount; i = i + 1
+        {
+            var c = chars[charIndex + i]
+            bytes[bytePos] = uint8(int32(c))
+            bytes[bytePos + 1] = uint8(int32(c) >> 8)
+            bytePos = bytePos + 2
+        }
+        return charCount * 2
+    }
+
+    public function GetCharCount(bytes: uint8[], index: int32, count: int32): int32
+    {
+        return count / 2
+    }
+
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32): int32
+    {
+        var charCount = byteCount / 2
+        for var i = 0; i < charCount; i = i + 1
+        {
+            var code = int32(bytes[byteIndex + i * 2]) | (int32(bytes[byteIndex + i * 2 + 1]) << 8)
+            chars[charIndex + i] = char(code)
+        }
+        return charCount
+    }
+
+    public function GetMaxByteCount(charCount: int32): int32
+    {
+        return charCount * 2
+    }
+
+    public function GetMaxCharCount(byteCount: int32): int32
+    {
+        return byteCount / 2
+    }
+
+    public function GetEncoder(): Encoder
+    {
+        return new UnicodeEncoder()
+    }
+
+    public function GetDecoder(): Decoder
+    {
+        return new UnicodeDecoder()
+    }
+
+    public function GetPreamble(): uint8[]
+    {
+        return [0xFF, 0xFE]
+    }
+}
+
+public class BigEndianUnicodeEncoding : Encoding
+{
+    public function GetByteCount(chars: char[], index: int32, count: int32): int32
+    {
+        return count * 2
+    }
+
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32): int32
+    {
+        var bytePos = byteIndex
+        for var i = 0; i < charCount; i = i + 1
+        {
+            var c = chars[charIndex + i]
+            bytes[bytePos] = uint8(int32(c) >> 8)
+            bytes[bytePos + 1] = uint8(int32(c))
+            bytePos = bytePos + 2
+        }
+        return charCount * 2
+    }
+
+    public function GetCharCount(bytes: uint8[], index: int32, count: int32): int32
+    {
+        return count / 2
+    }
+
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32): int32
+    {
+        var charCount = byteCount / 2
+        for var i = 0; i < charCount; i = i + 1
+        {
+            var code = (int32(bytes[byteIndex + i * 2]) << 8) | int32(bytes[byteIndex + i * 2 + 1])
+            chars[charIndex + i] = char(code)
+        }
+        return charCount
+    }
+
+    public function GetMaxByteCount(charCount: int32): int32
+    {
+        return charCount * 2
+    }
+
+    public function GetMaxCharCount(byteCount: int32): int32
+    {
+        return byteCount / 2
+    }
+
+    public function GetEncoder(): Encoder
+    {
+        return new BigEndianUnicodeEncoder()
+    }
+
+    public function GetDecoder(): Decoder
+    {
+        return new BigEndianUnicodeDecoder()
+    }
+
+    public function GetPreamble(): uint8[]
+    {
+        return [0xFE, 0xFF]
+    }
+}
+
+public class ASCIIEncoding : Encoding
+{
+    public function GetByteCount(chars: char[], index: int32, count: int32): int32
+    {
+        return count
+    }
+
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32): int32
+    {
+        for var i = 0; i < charCount; i = i + 1
+        {
+            var c = chars[charIndex + i]
+            var code = int32(c)
+            if code > 127
+            {
+                code = 63
+            }
+            bytes[byteIndex + i] = uint8(code)
+        }
+        return charCount
+    }
+
+    public function GetCharCount(bytes: uint8[], index: int32, count: int32): int32
+    {
+        return count
+    }
+
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32): int32
+    {
+        for var i = 0; i < byteCount; i = i + 1
+        {
+            chars[charIndex + i] = char(int32(bytes[byteIndex + i]))
+        }
+        return byteCount
+    }
+
+    public function GetMaxByteCount(charCount: int32): int32
+    {
+        return charCount
+    }
+
+    public function GetMaxCharCount(byteCount: int32): int32
+    {
+        return byteCount
+    }
+
+    public function GetEncoder(): Encoder
+    {
+        return new ASCIIEncoder()
+    }
+
+    public function GetDecoder(): Decoder
+    {
+        return new ASCIIDecoder()
+    }
+
+    public function GetPreamble(): uint8[]
+    {
+        return new uint8[0]
+    }
+}
+
+public abstract class Encoder
+{
+    public abstract function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32, flush: bool): int32
+    public abstract function Reset()
+}
+
+public abstract class Decoder
+{
+    public abstract function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32, flush: bool): int32
+    public abstract function Reset()
+}
+
+public class UTF8Encoder : Encoder
+{
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32, flush: bool): int32
+    {
+        return Encoding.UTF8.GetBytes(chars, charIndex, charCount, bytes, byteIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}
+
+public class UTF8Decoder : Decoder
+{
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32, flush: bool): int32
+    {
+        return Encoding.UTF8.GetChars(bytes, byteIndex, byteCount, chars, charIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}
+
+public class UnicodeEncoder : Encoder
+{
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32, flush: bool): int32
+    {
+        return Encoding.Unicode.GetBytes(chars, charIndex, charCount, bytes, byteIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}
+
+public class UnicodeDecoder : Decoder
+{
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32, flush: bool): int32
+    {
+        return Encoding.Unicode.GetChars(bytes, byteIndex, byteCount, chars, charIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}
+
+public class BigEndianUnicodeEncoder : Encoder
+{
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32, flush: bool): int32
+    {
+        return Encoding.BigEndianUnicode.GetBytes(chars, charIndex, charCount, bytes, byteIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}
+
+public class BigEndianUnicodeDecoder : Decoder
+{
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32, flush: bool): int32
+    {
+        return Encoding.BigEndianUnicode.GetChars(bytes, byteIndex, byteCount, chars, charIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}
+
+public class ASCIIEncoder : Encoder
+{
+    public function GetBytes(chars: char[], charIndex: int32, charCount: int32, bytes: uint8[], byteIndex: int32, flush: bool): int32
+    {
+        return Encoding.ASCII.GetBytes(chars, charIndex, charCount, bytes, byteIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}
+
+public class ASCIIDecoder : Decoder
+{
+    public function GetChars(bytes: uint8[], byteIndex: int32, byteCount: int32, chars: char[], charIndex: int32, flush: bool): int32
+    {
+        return Encoding.ASCII.GetChars(bytes, byteIndex, byteCount, chars, charIndex)
+    }
+
+    public function Reset()
+    {
+    }
+}

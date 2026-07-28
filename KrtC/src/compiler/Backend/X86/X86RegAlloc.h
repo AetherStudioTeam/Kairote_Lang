@@ -61,9 +61,7 @@ void conflict_graph_build(ConflictGraph* graph, LivenessAnalysis* liveness, KrtI
 void conflict_graph_add_edge(ConflictGraph* graph, int temp_a, int temp_b);
 int conflict_graph_are_conflicting(ConflictGraph* graph, int temp_a, int temp_b);
 
-static const char* g_allocable_regs[X86_NUM_ALLOCABLE_REGS] = {
-    "r10", "r11"
-};
+extern const char* g_allocable_regs[X86_NUM_ALLOCABLE_REGS];
 
 typedef struct {
     int temp_to_reg[X86_MAX_TEMP_LOCATIONS];

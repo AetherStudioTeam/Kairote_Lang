@@ -1,6 +1,6 @@
 #include "VmCodegen.h"
 #include "../../../Core/Utils/KrtCommon.h"
-#include "../../../Shared/BytecodeGenerator.h"
+#include "../../../../Shared/BytecodeGenerator.h"
 #include <string.h>
 #include <stdio.h>
 

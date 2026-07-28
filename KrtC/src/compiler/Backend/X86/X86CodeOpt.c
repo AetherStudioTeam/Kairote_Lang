@@ -138,15 +138,17 @@ static bool match_strength_reduction_candidate(KrtIRInst* inst) {
 }
 
 static bool apply_mov_mov_elimination(KrtIRBasicBlock* block, KrtIRInst* inst1, KrtIRInst* inst2) {
+    (void)block;
     if (!match_mov_mov(inst1, inst2)) return false;
-    
+
     inst2->operands[0] = inst1->operands[0];
     return true;
 }
 
 static bool apply_redundant_load_store_elimination(KrtIRBasicBlock* block, KrtIRInst* inst1, KrtIRInst* inst2) {
+    (void)block;
     if (!match_redundant_load_store(inst1, inst2)) return false;
-    
+
     inst2->opcode = KRT_IR_COPY;
     inst2->operands[0] = inst1->operands[1];
     inst2->operand_count = 1;

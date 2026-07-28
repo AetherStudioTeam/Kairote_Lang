@@ -1,0 +1,379 @@
+namespace System.IO
+
+public class BufferedStream : Stream
+{
+    private var stream: Stream
+    private var buffer: uint8[]
+    private var bufferSize: int32
+    private var readPos: int32
+    private var readLen: int32
+    private var writePos: int32
+    private var lastOperationWasRead: bool
+
+    private static var DefaultBufferSize: int32 = 4096
+    private static var MaxShadowBufferSize: int32 = 81920
+
+    public function BufferedStream(stream: Stream)
+    {
+        this.BufferedStream(stream, BufferedStream.DefaultBufferSize)
+    }
+
+    public function BufferedStream(stream: Stream, bufferSize: int32)
+    {
+        if stream == null
+        {
+            throw new ArgumentNullException("stream")
+        }
+        if bufferSize <= 0
+        {
+            throw new ArgumentOutOfRangeException("bufferSize")
+        }
+        this.stream = stream
+        this.bufferSize = bufferSize
+        this.buffer = new uint8[bufferSize]
+        this.readPos = 0
+        this.readLen = 0
+        this.writePos = 0
+        this.lastOperationWasRead = false
+    }
+
+    public function get_CanRead(): bool
+    {
+        return this.stream != null && this.stream.CanRead
+    }
+
+    public function get_CanWrite(): bool
+    {
+        return this.stream != null && this.stream.CanWrite
+    }
+
+    public function get_CanSeek(): bool
+    {
+        return this.stream != null && this.stream.CanSeek
+    }
+
+    public function get_Length(): int64
+    {
+        this.EnsureNotClosed()
+        if this.writePos > 0
+        {
+            this.FlushWrite()
+        }
+        return this.stream.Length
+    }
+
+    public function get_Position(): int64
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanSeek()
+        return this.stream.Position + int64(this.readPos - this.readLen + this.writePos)
+    }
+
+    public function set_Position(value: int64)
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanSeek()
+        if value < 0
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        if this.writePos > 0
+        {
+            this.FlushWrite()
+        }
+        this.readPos = 0
+        this.readLen = 0
+        this.stream.Position = value
+    }
+
+    public function get_UnderlyingStream(): Stream
+    {
+        return this.stream
+    }
+
+    public function Flush()
+    {
+        this.EnsureNotClosed()
+        if this.writePos > 0
+        {
+            this.FlushWrite()
+        }
+        else if this.readPos < this.readLen && this.stream.CanSeek
+        {
+            this.FlushRead()
+        }
+        this.readPos = 0
+        this.readLen = 0
+        this.writePos = 0
+        this.stream.Flush()
+    }
+
+    public function Seek(offset: int64, origin: SeekOrigin): int64
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanSeek()
+        if this.writePos > 0
+        {
+            this.FlushWrite()
+            return this.stream.Seek(offset, origin)
+        }
+        if this.readLen - this.readPos > 0 && origin == SeekOrigin.Current
+        {
+            offset = offset - int64(this.readLen - this.readPos)
+        }
+        var oldPos = this.Position
+        var newPos = this.stream.Seek(offset, origin)
+        this.readPos = int32(newPos - (oldPos - int64(this.readPos)))
+        if 0 <= this.readPos && this.readPos < this.readLen
+        {
+            this.stream.Seek(int64(this.readLen - this.readPos), SeekOrigin.Current)
+        }
+        else
+        {
+            this.readPos = 0
+            this.readLen = 0
+        }
+        return newPos
+    }
+
+    public function SetLength(value: int64)
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanSeek()
+        if value < 0
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        if this.writePos > 0
+        {
+            this.FlushWrite()
+        }
+        else if this.readPos < this.readLen
+        {
+            this.FlushRead()
+        }
+        this.readPos = 0
+        this.readLen = 0
+        this.writePos = 0
+        this.stream.SetLength(value)
+    }
+
+    public function Read(buffer: uint8[], offset: int32, count: int32): int32
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanRead()
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if offset < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("offset or count")
+        }
+        if buffer.Length - offset < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        var bytesFromBuffer = this.readLen - this.readPos
+        if bytesFromBuffer == 0
+        {
+            if this.writePos > 0
+            {
+                this.FlushWrite()
+            }
+            if count >= this.bufferSize
+            {
+                return this.stream.Read(buffer, offset, count)
+            }
+            this.readLen = this.stream.Read(this.buffer, 0, this.bufferSize)
+            if this.readLen == 0
+            {
+                return 0
+            }
+            bytesFromBuffer = this.readLen
+            this.readPos = 0
+        }
+        if bytesFromBuffer > count
+        {
+            bytesFromBuffer = count
+        }
+        for var i = 0; i < bytesFromBuffer; i = i + 1
+        {
+            buffer[offset + i] = this.buffer[this.readPos + i]
+        }
+        this.readPos = this.readPos + bytesFromBuffer
+        if bytesFromBuffer < count)
+        {
+            var bytesFromStream = this.stream.Read(buffer, offset + bytesFromBuffer, count - bytesFromBuffer)
+            bytesFromBuffer = bytesFromBuffer + bytesFromStream
+            this.readPos = 0
+            this.readLen = 0
+        }
+        this.lastOperationWasRead = true
+        return bytesFromBuffer
+    }
+
+    public function ReadByte(): int32
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanRead()
+        if this.readPos == this.readLen)
+        {
+            if this.writePos > 0)
+            {
+                this.FlushWrite()
+            }
+            this.readLen = this.stream.Read(this.buffer, 0, this.bufferSize)
+            this.readPos = 0
+            if this.readLen == 0)
+            {
+                return -1
+            }
+        }
+        var result = int32(this.buffer[this.readPos])
+        this.readPos = this.readPos + 1
+        this.lastOperationWasRead = true
+        return result
+    }
+
+    public function Write(buffer: uint8[], offset: int32, count: int32)
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanWrite()
+        if buffer == null)
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if offset < 0 || count < 0)
+        {
+            throw new ArgumentOutOfRangeException("offset or count")
+        }
+        if buffer.Length - offset < count)
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        if this.writePos == 0)
+        {
+            this.ClearReadBufferBeforeWrite()
+        }
+        var totalUserBytes = int64(this.writePos) + int64(count)
+        if totalUserBytes + int64(this.writePos) > int64(this.bufferSize))
+        {
+            this.FlushWrite()
+            if count >= this.bufferSize)
+            {
+                this.stream.Write(buffer, offset, count)
+                this.lastOperationWasRead = false
+                return
+            }
+        }
+        if count > this.bufferSize - this.writePos)
+        {
+            this.FlushWrite()
+        }
+        for var i = 0; i < count; i = i + 1)
+        {
+            this.buffer[this.writePos + i] = buffer[offset + i]
+        }
+        this.writePos = this.writePos + count
+        this.lastOperationWasRead = false
+    }
+
+    public function WriteByte(value: uint8)
+    {
+        this.EnsureNotClosed()
+        this.EnsureCanWrite()
+        if this.writePos == 0)
+        {
+            this.ClearReadBufferBeforeWrite()
+        }
+        if this.writePos >= this.bufferSize - 1)
+        {
+            this.FlushWrite()
+        }
+        this.buffer[this.writePos] = value
+        this.writePos = this.writePos + 1
+        this.lastOperationWasRead = false
+    }
+
+    public function Close()
+    {
+        this.Dispose()
+    }
+
+    public function Dispose()
+    {
+        if this.stream != null)
+        {
+            try
+            {
+                this.Flush()
+            }
+            finally
+            {
+                this.stream.Close()
+                this.stream = null
+                this.buffer = null
+            }
+        }
+    }
+
+    private function EnsureNotClosed()
+    {
+        if this.stream == null)
+        {
+            throw new ObjectDisposedException("BufferedStream")
+        }
+    }
+
+    private function EnsureCanSeek()
+    {
+        if !this.stream.CanSeek)
+        {
+            throw new NotSupportedException("Stream does not support seeking")
+        }
+    }
+
+    private function EnsureCanRead()
+    {
+        if !this.stream.CanRead)
+        {
+            throw new NotSupportedException("Stream does not support reading")
+        }
+    }
+
+    private function EnsureCanWrite()
+    {
+        if !this.stream.CanWrite)
+        {
+            throw new NotSupportedException("Stream does not support writing")
+        }
+    }
+
+    private function FlushRead()
+    {
+        if this.readPos - this.readLen != 0)
+        {
+            this.stream.Seek(int64(this.readPos - this.readLen), SeekOrigin.Current)
+        }
+        this.readPos = 0
+        this.readLen = 0
+    }
+
+    private function FlushWrite()
+    {
+        this.stream.Write(this.buffer, 0, this.writePos)
+        this.writePos = 0
+        this.stream.Flush()
+    }
+
+    private function ClearReadBufferBeforeWrite()
+    {
+        if this.readPos - this.readLen < 0)
+        {
+            this.FlushRead()
+        }
+        this.readPos = 0
+        this.readLen = 0
+    }
+}

@@ -1,0 +1,562 @@
+namespace System.IO
+
+public class MemoryStream : Stream
+{
+    private var buffer: uint8[]
+    private var origin: int32
+    private var position: int32
+    private var length: int32
+    private var capacity: int32
+    private var expandable: bool
+    private var writable: bool
+    private var exposable: bool
+    private var isOpen: bool
+
+    private static var MemStreamMaxLength: int32 = int32.MaxValue
+
+    public function MemoryStream()
+    {
+        this.MemoryStream(0)
+    }
+
+    public function MemoryStream(capacity: int32)
+    {
+        if capacity < 0
+        {
+            throw new ArgumentOutOfRangeException("capacity")
+        }
+        this.buffer = new uint8[capacity]
+        this.capacity = capacity
+        this.expandable = true
+        this.writable = true
+        this.exposable = true
+        this.origin = 0
+        this.isOpen = true
+    }
+
+    public function MemoryStream(buffer: uint8[])
+    {
+        this.MemoryStream(buffer, true)
+    }
+
+    public function MemoryStream(buffer: uint8[], writable: bool)
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        this.buffer = buffer
+        this.length = buffer.Length
+        this.capacity = buffer.Length
+        this.writable = writable
+        this.exposable = false
+        this.expandable = false
+        this.origin = 0
+        this.isOpen = true
+    }
+
+    public function MemoryStream(buffer: uint8[], index: int32, count: int32)
+    {
+        this.MemoryStream(buffer, index, count, true, false)
+    }
+
+    public function MemoryStream(buffer: uint8[], index: int32, count: int32, writable: bool)
+    {
+        this.MemoryStream(buffer, index, count, writable, false)
+    }
+
+    public function MemoryStream(buffer: uint8[], index: int32, count: int32, writable: bool, publiclyVisible: bool)
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if index < 0
+        {
+            throw new ArgumentOutOfRangeException("index")
+        }
+        if count < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if buffer.Length - index < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        this.buffer = buffer
+        this.origin = index
+        this.position = index
+        this.length = index + count
+        this.capacity = index + count
+        this.writable = writable
+        this.exposable = publiclyVisible
+        this.expandable = false
+        this.isOpen = true
+    }
+
+    public function get_CanRead(): bool
+    {
+        return this.isOpen
+    }
+
+    public function get_CanSeek(): bool
+    {
+        return this.isOpen
+    }
+
+    public function get_CanWrite(): bool
+    {
+        return this.writable
+    }
+
+    public function get_Length(): int64
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        return int64(this.length - this.origin)
+    }
+
+    public function get_Position(): int64
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        return int64(this.position - this.origin)
+    }
+
+    public function set_Position(value: int64)
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if value < 0 || value > int64(int32.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        this.position = this.origin + int32(value)
+    }
+
+    public function get_Capacity(): int32
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        return this.capacity - this.origin
+    }
+
+    public function set_Capacity(value: int32)
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if value < this.length - this.origin
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        if !this.expandable && value != this.capacity - this.origin
+        {
+            throw new NotSupportedException("Cannot change capacity")
+        }
+        if this.expandable && value != this.capacity)
+        {
+            if value > 0
+            {
+                var newBuffer = new uint8[value + this.origin]
+                if this.length > 0
+                {
+                    for var i = 0; i < this.length; i = i + 1
+                    {
+                        newBuffer[i] = this.buffer[i]
+                    }
+                }
+                this.buffer = newBuffer
+            }
+            else
+            {
+                this.buffer = null
+            }
+            this.capacity = value + this.origin
+        }
+    }
+
+    public function Flush()
+    {
+    }
+
+    public function GetBuffer(): uint8[]
+    {
+        if !this.exposable
+        {
+            throw new UnauthorizedAccessException("Buffer is not exposable")
+        }
+        return this.buffer
+    }
+
+    public function TryGetBuffer(buffer: ArraySegment<uint8>): bool
+    {
+        if !this.exposable
+        {
+            buffer = new ArraySegment<uint8>()
+            return false
+        }
+        buffer = new ArraySegment<uint8>(this.buffer, this.origin, this.length - this.origin)
+        return true
+    }
+
+    public function Read(buffer: uint8[], offset: int32, count: int32): int32
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if offset < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("offset or count")
+        }
+        if buffer.Length - offset < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        var n = this.length - this.position
+        if n > count
+        {
+            n = count
+        }
+        if n <= 0
+        {
+            return 0
+        }
+        if n <= 8
+        {
+            for var i = 0; i < n; i = i + 1
+            {
+                buffer[offset + i] = this.buffer[this.position + i]
+            }
+        }
+        else
+        {
+            for var i = 0; i < n; i = i + 1
+            {
+                buffer[offset + i] = this.buffer[this.position + i]
+            }
+        }
+        this.position = this.position + n
+        return n
+    }
+
+    public function ReadByte(): int32
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if this.position >= this.length
+        {
+            return -1
+        }
+        var result = int32(this.buffer[this.position])
+        this.position = this.position + 1
+        return result
+    }
+
+    public function Seek(offset: int64, loc: SeekOrigin): int64
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if offset > int64(int32.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException("offset")
+        }
+        var newPos = 0
+        if loc == SeekOrigin.Begin
+        {
+            newPos = this.origin + int32(offset)
+        }
+        else if loc == SeekOrigin.Current
+        {
+            newPos = this.position + int32(offset)
+        }
+        else if loc == SeekOrigin.End
+        {
+            newPos = this.length + int32(offset)
+        }
+        else
+        {
+            throw new ArgumentException("Invalid seek origin")
+        }
+        if newPos < this.origin
+        {
+            throw new IOException("Seek before origin")
+        }
+        this.position = newPos
+        return int64(this.position - this.origin)
+    }
+
+    public function SetLength(value: int64)
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if !this.writable
+        {
+            throw new NotSupportedException("Stream is not writable")
+        }
+        if value < 0 || value > int64(int32.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException("value")
+        }
+        var newLength = this.origin + int32(value)
+        var mustZero = newLength > this.length
+        this.EnsureCapacity(newLength)
+        if mustZero && newLength > this.length
+        {
+            for var i = this.length; i < newLength; i = i + 1
+            {
+                this.buffer[i] = 0
+            }
+        }
+        this.length = newLength
+        if this.position > newLength
+        {
+            this.position = newLength
+        }
+    }
+
+    public function ToArray(): uint8[]
+    {
+        var copy = new uint8[this.length - this.origin]
+        for var i = 0; i < this.length - this.origin; i = i + 1
+        {
+            copy[i] = this.buffer[this.origin + i]
+        }
+        return copy
+    }
+
+    public function Write(buffer: uint8[], offset: int32, count: int32)
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if !this.writable
+        {
+            throw new NotSupportedException("Stream is not writable")
+        }
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if offset < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("offset or count")
+        }
+        if buffer.Length - offset < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        var i = this.position + count
+        if i < 0
+        {
+            throw new IOException("Stream too long")
+        }
+        if i > this.length
+        {
+            var mustZero = this.position > this.length
+            if i > this.capacity
+            {
+                var mustZero2 = this.position > this.length
+                this.EnsureCapacity(i)
+                if mustZero2
+                {
+                    for var j = this.length; j < this.position; j = j + 1
+                    {
+                        this.buffer[j] = 0
+                    }
+                }
+            }
+            if mustZero
+            {
+                for var j = this.length; j < this.position; j = j + 1
+                {
+                    this.buffer[j] = 0
+                }
+            }
+            this.length = i
+        }
+        if count <= 8
+        {
+            for var j = 0; j < count; j = j + 1
+            {
+                this.buffer[this.position + j] = buffer[offset + j]
+            }
+        }
+        else
+        {
+            for var j = 0; j < count; j = j + 1
+            {
+                this.buffer[this.position + j] = buffer[offset + j]
+            }
+        }
+        this.position = i
+    }
+
+    public function WriteByte(value: uint8)
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if !this.writable
+        {
+            throw new NotSupportedException("Stream is not writable")
+        }
+        if this.position >= this.length
+        {
+            var newLength = this.position + 1
+            var mustZero = this.position > this.length
+            if newLength >= this.capacity
+            {
+                var mustZero2 = this.position > this.length
+                this.EnsureCapacity(newLength)
+                if mustZero2
+                {
+                    for var i = this.length; i < this.position; i = i + 1
+                    {
+                        this.buffer[i] = 0
+                    }
+                }
+            }
+            if mustZero
+            {
+                for var i = this.length; i < this.position; i = i + 1
+                {
+                    this.buffer[i] = 0
+                }
+            }
+            this.length = newLength
+        }
+        this.buffer[this.position] = value
+        this.position = this.position + 1
+    }
+
+    public function WriteTo(stream: Stream)
+    {
+        if !this.isOpen
+        {
+            throw new ObjectDisposedException("MemoryStream")
+        }
+        if stream == null
+        {
+            throw new ArgumentNullException("stream")
+        }
+        stream.Write(this.buffer, this.origin, this.length - this.origin)
+    }
+
+    public function Close()
+    {
+        this.isOpen = false
+        this.writable = false
+        this.expandable = false
+    }
+
+    private function EnsureCapacity(value: int32): bool
+    {
+        if value > this.capacity
+        {
+            var newCapacity = value
+            if newCapacity < 256
+            {
+                newCapacity = 256
+            }
+            if newCapacity < this.capacity * 2
+            {
+                newCapacity = this.capacity * 2
+            }
+            if this.capacity == 0)
+            {
+                newCapacity = 256
+            }
+            if newCapacity > 0)
+            {
+                var newBuffer = new uint8[newCapacity]
+                if this.length > 0)
+                {
+                    for var i = 0; i < this.length; i = i + 1
+                    {
+                        newBuffer[i] = this.buffer[i]
+                    }
+                }
+                this.buffer = newBuffer
+            }
+            this.capacity = newCapacity
+            return true
+        }
+        return false
+    }
+}
+
+public class ArraySegment<T>
+{
+    private var array: T[]
+    private var offset: int32
+    private var count: int32
+
+    public function ArraySegment()
+    {
+        this.array = null
+        this.offset = 0
+        this.count = 0
+    }
+
+    public function ArraySegment(array: T[])
+    {
+        this.ArraySegment(array, 0, array.Length)
+    }
+
+    public function ArraySegment(array: T[], offset: int32, count: int32)
+    {
+        if array == null
+        {
+            throw new ArgumentNullException("array")
+        }
+        if offset < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("offset or count")
+        }
+        if array.Length - offset < count
+        {
+            throw new ArgumentException("Array too small")
+        }
+        this.array = array
+        this.offset = offset
+        this.count = count
+    }
+
+    public function get_Array(): T[]
+    {
+        return this.array
+    }
+
+    public function get_Offset(): int32
+    {
+        return this.offset
+    }
+
+    public function get_Count(): int32
+    {
+        return this.count
+    }
+}

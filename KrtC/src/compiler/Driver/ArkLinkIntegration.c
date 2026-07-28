@@ -1,7 +1,7 @@
 #include "ArkLinkIntegration.h"
 #include "../../Core/Utils/KrtCommon.h"
-#include "../../Core/Utils/logger.h"
-#include "../../Core/Utils/path.h"
+#include "../../Core/Utils/Logger.h"
+#include "../../Core/Utils/Path.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -10,6 +10,7 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <sys/stat.h>
 #include <dlfcn.h>
 #endif
 
@@ -39,14 +40,14 @@ KrtArkLinkContext* KrtArkLinkContextCreate(KrtConfig* config) {
     ctx->obj_files = (char**)KRT_MALLOC(ctx->obj_capacity * sizeof(char*));
     
     if (!ctx->obj_files) {
-        free(ctx);
+        KRT_FREE(ctx);
         return NULL;
     }
     
     ctx->session = arklink_session_create();
     if (!ctx->session) {
-        free(ctx->obj_files);
-        free(ctx);
+        KRT_FREE(ctx->obj_files);
+        KRT_FREE(ctx);
         return NULL;
     }
     
@@ -63,8 +64,11 @@ KrtArkLinkContext* KrtArkLinkContextCreate(KrtConfig* config) {
     if (linker_config && linker_config->entry_point) {
         arklink_session_set_entry_point(ctx->session, linker_config->entry_point);
     } else {
-        
-        arklink_session_set_entry_point(ctx->session, "_ZN4mainEv");
+        /* Linux ELF executables need a _start stub; Windows uses the mangled main directly. */
+        const char* default_entry = (config->platform == KRT_CONFIG_PLATFORM_WINDOWS)
+                                    ? "_ZN4mainEv"
+                                    : "_start";
+        arklink_session_set_entry_point(ctx->session, default_entry);
     }
     
     if (config->platform == KRT_CONFIG_PLATFORM_WINDOWS) {
@@ -88,12 +92,12 @@ void KrtArkLinkContextDestroy(KrtArkLinkContext* ctx) {
     
     if (ctx->obj_files) {
         for (int i = 0; i < ctx->obj_count; i++) {
-            free(ctx->obj_files[i]);
+            KRT_FREE(ctx->obj_files[i]);
         }
-        free(ctx->obj_files);
+        KRT_FREE(ctx->obj_files);
     }
     
-    free(ctx);
+    KRT_FREE(ctx);
 }
 
 int KrtArkLinkAddObjectFile(KrtArkLinkContext* ctx, const char* obj_path) {
@@ -205,8 +209,14 @@ int KrtArkLinkLinkObjects(const char** obj_files, int obj_count,
     }
     
     int result = KrtArkLinkLink(ctx);
-    
+
+#ifndef _WIN32
+    if (result == 0) {
+        chmod(output_path, S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+    }
+#endif
+
     KrtArkLinkContextDestroy(ctx);
-    
+
     return result;
 }

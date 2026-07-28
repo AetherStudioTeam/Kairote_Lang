@@ -1,0 +1,482 @@
+namespace System
+
+public struct Decimal
+{
+    private var flags: int32
+    private var hi: int32
+    private var lo: int32
+    private var mid: int32
+
+    private static var SignMask: int32 = int32(0x80000000)
+    private static var ScaleMask: int32 = 0x00FF0000
+    private static var ScaleShift: int32 = 16
+    private static var MaxInt32Scale: int32 = 9
+    private static var MaxScale: int32 = 28
+    private static var Int32Mask: int32 = int32(0xFFFFFFFF)
+
+    public static var Zero: Decimal = new Decimal(0)
+    public static var One: Decimal = new Decimal(1)
+    public static var MinusOne: Decimal = new Decimal(-1)
+    public static var MaxValue: Decimal = new Decimal(int32.MaxValue, int32.MaxValue, int32.MaxValue, false, 0)
+    public static var MinValue: Decimal = new Decimal(int32.MaxValue, int32.MaxValue, int32.MaxValue, true, 0)
+
+    public function Decimal(value: int32)
+    {
+        this.lo = value
+        this.mid = 0
+        this.hi = 0
+        this.flags = 0
+        if value < 0)
+        {
+            this.flags = Decimal.SignMask
+        }
+    }
+
+    public function Decimal(value: int64)
+    {
+        var isNegative = value < 0
+        if isNegative)
+        {
+            value = -value
+        }
+        this.lo = int32(value)
+        this.mid = int32(value >> 32)
+        this.hi = 0
+        this.flags = 0
+        if isNegative)
+        {
+            this.flags = Decimal.SignMask
+        }
+    }
+
+    public function Decimal(value: uint32)
+    {
+        this.lo = int32(value)
+        this.mid = 0
+        this.hi = 0
+        this.flags = 0
+    }
+
+    public function Decimal(value: uint64)
+    {
+        this.lo = int32(value)
+        this.mid = int32(value >> 32)
+        this.hi = 0
+        this.flags = 0
+    }
+
+    public function Decimal(value: float32)
+    {
+        this.Decimal(float64(value))
+    }
+
+    public function Decimal(value: float64)
+    {
+        if float64.IsNaN(value) || float64.IsInfinity(value))
+        {
+            throw new OverflowException("Value is not a valid number")
+        }
+        var isNegative = value < 0
+        if isNegative)
+        {
+            value = -value
+        }
+        var scale = 0
+        while value != float64(int64(value)) && scale < Decimal.MaxScale)
+        {
+            value = value * 10.0
+            scale = scale + 1
+        }
+        var intValue = int64(value)
+        this.lo = int32(intValue)
+        this.mid = int32(intValue >> 32)
+        this.hi = 0
+        this.flags = scale << Decimal.ScaleShift
+        if isNegative)
+        {
+            this.flags = this.flags | Decimal.SignMask
+        }
+    }
+
+    public function Decimal(bits: int32[])
+    {
+        if bits == null || bits.Length != 4)
+        {
+            throw new ArgumentException("Invalid bits array")
+        }
+        this.lo = bits[0]
+        this.mid = bits[1]
+        this.hi = bits[2]
+        this.flags = bits[3]
+    }
+
+    public function Decimal(lo: int32, mid: int32, hi: int32, isNegative: bool, scale: uint8)
+    {
+        if scale > Decimal.MaxScale)
+        {
+            throw new ArgumentOutOfRangeException("scale")
+        }
+        this.lo = lo
+        this.mid = mid
+        this.hi = hi
+        this.flags = int32(scale) << Decimal.ScaleShift
+        if isNegative)
+        {
+            this.flags = this.flags | Decimal.SignMask
+        }
+    }
+
+    public function GetBits(): int32[]
+    {
+        return [this.lo, this.mid, this.hi, this.flags]
+    }
+
+    public function get_Scale(): int32
+    {
+        return (this.flags & Decimal.ScaleMask) >> Decimal.ScaleShift
+    }
+
+    public function get_IsNegative(): bool
+    {
+        return (this.flags & Decimal.SignMask) != 0
+    }
+
+    public function ToInt32(): int32
+    {
+        var result = this.lo
+        if this.IsNegative)
+        {
+            result = -result
+        }
+        return result
+    }
+
+    public function ToInt64(): int64
+    {
+        var result = int64(uint32(this.lo)) | (int64(uint32(this.mid)) << 32)
+        if this.IsNegative)
+        {
+            result = -result
+        }
+        return result
+    }
+
+    public function ToSingle(): float32
+    {
+        return float32(this.ToDouble())
+    }
+
+    public function ToDouble(): float64
+    {
+        var result = float64(uint32(this.lo))
+        result = result + float64(uint32(this.mid)) * 4294967296.0
+        result = result + float64(uint32(this.hi)) * 18446744073709551616.0
+        var scale = this.Scale
+        for var i = 0; i < scale; i = i + 1)
+        {
+            result = result / 10.0
+        }
+        if this.IsNegative)
+        {
+            result = -result
+        }
+        return result
+    }
+
+    public function ToString(): string
+    {
+        return this.ToDouble().ToString()
+    }
+
+    public function CompareTo(value: Decimal): int32
+    {
+        var diff = this - value
+        if diff.lo == 0 && diff.mid == 0 && diff.hi == 0)
+        {
+            return 0
+        }
+        if diff.IsNegative)
+        {
+            return -1
+        }
+        return 1
+    }
+
+    public function Equals(value: Decimal): bool
+    {
+        return this.lo == value.lo && this.mid == value.mid && this.hi == value.hi && this.flags == value.flags
+    }
+
+    public function Equals(obj: Object): bool
+    {
+        if obj is Decimal)
+        {
+            return this.Equals(Decimal(obj))
+        }
+        return false
+    }
+
+    public function GetHashCode(): int32
+    {
+        return this.lo ^ this.mid ^ this.hi ^ this.flags
+    }
+
+    public static function Add(d1: Decimal, d2: Decimal): Decimal
+    {
+        return d1 + d2
+    }
+
+    public static function Subtract(d1: Decimal, d2: Decimal): Decimal
+    {
+        return d1 - d2
+    }
+
+    public static function Multiply(d1: Decimal, d2: Decimal): Decimal
+    {
+        return d1 * d2
+    }
+
+    public static function Divide(d1: Decimal, d2: Decimal): Decimal
+    {
+        return d1 / d2
+    }
+
+    public static function Remainder(d1: Decimal, d2: Decimal): Decimal
+    {
+        return d1 % d2
+    }
+
+    public static function Negate(d: Decimal): Decimal
+    {
+        return -d
+    }
+
+    public static function Floor(d: Decimal): Decimal
+    {
+        var scale = d.Scale
+        if scale == 0)
+        {
+            return d
+        }
+        var divisor = 1
+        for var i = 0; i < scale; i = i + 1)
+        {
+            divisor = divisor * 10
+        }
+        var intValue = d.ToInt64() / int64(divisor)
+        return new Decimal(intValue)
+    }
+
+    public static function Truncate(d: Decimal): Decimal
+    {
+        return Decimal.Floor(d)
+    }
+
+    public static function Round(d: Decimal): Decimal
+    {
+        return Decimal.Round(d, 0)
+    }
+
+    public static function Round(d: Decimal, decimals: int32): Decimal
+    {
+        if decimals < 0 || decimals > Decimal.MaxScale)
+        {
+            throw new ArgumentOutOfRangeException("decimals")
+        }
+        var scale = d.Scale
+        if scale <= decimals)
+        {
+            return d
+        }
+        var diff = scale - decimals
+        var divisor = 1
+        for var i = 0; i < diff; i = i + 1)
+        {
+            divisor = divisor * 10
+        }
+        var intValue = d.ToInt64() / int64(divisor)
+        var remainder = d.ToInt64() % int64(divisor)
+        if remainder >= int64(divisor / 2))
+        {
+            intValue = intValue + 1
+        }
+        var result = new Decimal(intValue)
+        result.flags = (result.flags & ~Decimal.ScaleMask) | (decimals << Decimal.ScaleShift)
+        return result
+    }
+
+    public static function Ceiling(d: Decimal): Decimal
+    {
+        var floor = Decimal.Floor(d)
+        if floor != d)
+        {
+            return floor + Decimal.One
+        }
+        return d
+    }
+
+    public static function Abs(d: Decimal): Decimal
+    {
+        if d.IsNegative)
+        {
+            return -d
+        }
+        return d
+    }
+
+    public static function Max(d1: Decimal, d2: Decimal): Decimal
+    {
+        if d1 > d2)
+        {
+            return d1
+        }
+        return d2
+    }
+
+    public static function Min(d1: Decimal, d2: Decimal): Decimal
+    {
+        if d1 < d2)
+        {
+            return d1
+        }
+        return d2
+    }
+
+    public static function Parse(s: string): Decimal
+    {
+        throw new NotImplementedException()
+    }
+
+    public static function TryParse(s: string, result: Decimal): bool
+    {
+        result = Decimal.Zero
+        return false
+    }
+
+    public static function op_Addition(d1: Decimal, d2: Decimal): Decimal
+    {
+        var v1 = d1.ToDouble()
+        var v2 = d2.ToDouble()
+        return new Decimal(v1 + v2)
+    }
+
+    public static function op_Subtraction(d1: Decimal, d2: Decimal): Decimal
+    {
+        var v1 = d1.ToDouble()
+        var v2 = d2.ToDouble()
+        return new Decimal(v1 - v2)
+    }
+
+    public static function op_Multiply(d1: Decimal, d2: Decimal): Decimal
+    {
+        var v1 = d1.ToDouble()
+        var v2 = d2.ToDouble()
+        return new Decimal(v1 * v2)
+    }
+
+    public static function op_Division(d1: Decimal, d2: Decimal): Decimal
+    {
+        var v1 = d1.ToDouble()
+        var v2 = d2.ToDouble()
+        return new Decimal(v1 / v2)
+    }
+
+    public static function op_Modulus(d1: Decimal, d2: Decimal): Decimal
+    {
+        var v1 = d1.ToDouble()
+        var v2 = d2.ToDouble()
+        return new Decimal(v1 % v2)
+    }
+
+    public static function op_UnaryNegation(d: Decimal): Decimal
+    {
+        var result = d
+        result.flags = result.flags ^ Decimal.SignMask
+        return result
+    }
+
+    public static function op_UnaryPlus(d: Decimal): Decimal
+    {
+        return d
+    }
+
+    public static function op_Increment(d: Decimal): Decimal
+    {
+        return d + Decimal.One
+    }
+
+    public static function op_Decrement(d: Decimal): Decimal
+    {
+        return d - Decimal.One
+    }
+
+    public static function op_Equality(d1: Decimal, d2: Decimal): bool
+    {
+        return d1.CompareTo(d2) == 0
+    }
+
+    public static function op_Inequality(d1: Decimal, d2: Decimal): bool
+    {
+        return d1.CompareTo(d2) != 0
+    }
+
+    public static function op_LessThan(d1: Decimal, d2: Decimal): bool
+    {
+        return d1.CompareTo(d2) < 0
+    }
+
+    public static function op_LessThanOrEqual(d1: Decimal, d2: Decimal): bool
+    {
+        return d1.CompareTo(d2) <= 0
+    }
+
+    public static function op_GreaterThan(d1: Decimal, d2: Decimal): bool
+    {
+        return d1.CompareTo(d2) > 0
+    }
+
+    public static function op_GreaterThanOrEqual(d1: Decimal, d2: Decimal): bool
+    {
+        return d1.CompareTo(d2) >= 0
+    }
+
+    public static function op_Explicit(value: Decimal): int32
+    {
+        return value.ToInt32()
+    }
+
+    public static function op_Explicit(value: Decimal): int64
+    {
+        return value.ToInt64()
+    }
+
+    public static function op_Explicit(value: Decimal): float32
+    {
+        return value.ToSingle()
+    }
+
+    public static function op_Explicit(value: Decimal): float64
+    {
+        return value.ToDouble()
+    }
+
+    public static function op_Implicit(value: int32): Decimal
+    {
+        return new Decimal(value)
+    }
+
+    public static function op_Implicit(value: int64): Decimal
+    {
+        return new Decimal(value)
+    }
+
+    public static function op_Implicit(value: uint32): Decimal
+    {
+        return new Decimal(value)
+    }
+
+    public static function op_Implicit(value: uint64): Decimal
+    {
+        return new Decimal(value)
+    }
+}

@@ -1,8 +1,8 @@
 #include "ParallelCompiler.h"
 #include "ArkLinkIntegration.h"
 #include "../../Core/Utils/KrtCommon.h"
-#include "../../Core/Utils/logger.h"
-#include "../../Core/Utils/path.h"
+#include "../../Core/Utils/Logger.h"
+#include "../../Core/Utils/Path.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

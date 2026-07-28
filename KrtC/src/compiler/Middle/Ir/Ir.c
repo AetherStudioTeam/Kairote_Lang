@@ -1036,10 +1036,18 @@ static void KrtIrPrintInstruction(KrtIRInst* inst, FILE* output, KrtIRFunction* 
         case KRT_IR_LOAD: op_name = "load"; break;
         case KRT_IR_STORE: op_name = "store"; break;
         case KRT_IR_ALLOC: op_name = "alloc"; break;
+        case KRT_IR_IMM: op_name = "imm"; break;
         case KRT_IR_ADD: op_name = "add"; break;
         case KRT_IR_SUB: op_name = "sub"; break;
         case KRT_IR_MUL: op_name = "mul"; break;
         case KRT_IR_DIV: op_name = "div"; break;
+        case KRT_IR_MOD: op_name = "mod"; break;
+        case KRT_IR_AND: op_name = "and"; break;
+        case KRT_IR_OR: op_name = "or"; break;
+        case KRT_IR_XOR: op_name = "xor"; break;
+        case KRT_IR_LSHIFT: op_name = "lshift"; break;
+        case KRT_IR_RSHIFT: op_name = "rshift"; break;
+        case KRT_IR_POW: op_name = "pow"; break;
         case KRT_IR_LT: op_name = "icmp slt"; break;
         case KRT_IR_GT: op_name = "icmp sgt"; break;
         case KRT_IR_EQ: op_name = "icmp eq"; break;
@@ -1058,6 +1066,7 @@ static void KrtIrPrintInstruction(KrtIRInst* inst, FILE* output, KrtIRFunction* 
         case KRT_IR_ARRAY_STORE: op_name = "array_store"; break;
         case KRT_IR_INT_TO_STRING: op_name = "int_to_string"; break;
         case KRT_IR_DOUBLE_TO_STRING: op_name = "double_to_string"; break;
+        case KRT_IR_COPY: op_name = "copy"; break;
         case KRT_IR_NOP: op_name = "nop"; break;
     }
     fprintf(output, "%s", op_name);

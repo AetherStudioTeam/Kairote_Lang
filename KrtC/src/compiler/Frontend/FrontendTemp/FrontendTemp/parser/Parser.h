@@ -24,6 +24,9 @@ ASTNode* parser_parse_try_statement(Parser* parser);
 ASTNode* parser_parse_catch_clause(Parser* parser);
 ASTNode* parser_parse_finally_clause(Parser* parser);
 ASTNode* parser_parse_throw_statement(Parser* parser);
+ASTNode* parser_parse_lock_statement(Parser* parser);
+ASTNode* parser_parse_yield_statement(Parser* parser);
+ASTNode* parser_parse_using_statement(Parser* parser);
 
 ASTNode* parser_parse_template_declaration(Parser* parser);
 ASTNode* parser_parse_template_parameter(Parser* parser);

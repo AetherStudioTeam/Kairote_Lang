@@ -1,0 +1,521 @@
+namespace System.IO
+
+public class StreamWriter : TextWriter
+{
+    public static var Null: StreamWriter = new NullStreamWriter()
+
+    private var stream: Stream
+    private var encoding: Encoding
+    private var encoder: Encoder
+    private var byteBuffer: uint8[]
+    private var charBuffer: char[]
+    private var charPos: int32
+    private var charLen: int32
+    private var autoFlush: bool
+    private var haveWrittenPreamble: bool
+    private var preamble: uint8[]
+    private var closable: bool
+
+    public function StreamWriter(stream: Stream)
+    {
+        this.StreamWriter(stream, Encoding.UTF8, 1024, false)
+    }
+
+    public function StreamWriter(stream: Stream, encoding: Encoding)
+    {
+        this.StreamWriter(stream, encoding, 1024, false)
+    }
+
+    public function StreamWriter(stream: Stream, encoding: Encoding, bufferSize: int32)
+    {
+        this.StreamWriter(stream, encoding, bufferSize, false)
+    }
+
+    public function StreamWriter(stream: Stream, encoding: Encoding, bufferSize: int32, leaveOpen: bool)
+    {
+        if stream == null
+        {
+            throw new ArgumentNullException("stream")
+        }
+        if encoding == null
+        {
+            throw new ArgumentNullException("encoding")
+        }
+        if bufferSize <= 0
+        {
+            throw new ArgumentOutOfRangeException("bufferSize")
+        }
+        if !stream.CanWrite
+        {
+            throw new ArgumentException("Stream does not support writing")
+        }
+        this.stream = stream
+        this.encoding = encoding
+        this.encoder = encoding.GetEncoder()
+        this.byteBuffer = new uint8[encoding.GetMaxByteCount(bufferSize)]
+        this.charBuffer = new char[bufferSize]
+        this.charPos = 0
+        this.charLen = bufferSize
+        this.autoFlush = false
+        this.haveWrittenPreamble = false
+        this.preamble = encoding.GetPreamble()
+        this.closable = !leaveOpen
+    }
+
+    public function StreamWriter(path: string)
+    {
+        this.StreamWriter(path, false, Encoding.UTF8, 1024)
+    }
+
+    public function StreamWriter(path: string, append: bool)
+    {
+        this.StreamWriter(path, append, Encoding.UTF8, 1024)
+    }
+
+    public function StreamWriter(path: string, append: bool, encoding: Encoding)
+    {
+        this.StreamWriter(path, append, encoding, 1024)
+    }
+
+    public function StreamWriter(path: string, append: bool, encoding: Encoding, bufferSize: int32)
+    {
+        if path == null
+        {
+            throw new ArgumentNullException("path")
+        }
+        if encoding == null
+        {
+            throw new ArgumentNullException("encoding")
+        }
+        if bufferSize <= 0
+        {
+            throw new ArgumentOutOfRangeException("bufferSize")
+        }
+        var mode = append ? FileMode.Append : FileMode.Create
+        var stream = new FileStream(path, mode, FileAccess.Write, FileShare.Read, bufferSize)
+        this.StreamWriter(stream, encoding, bufferSize, false)
+        this.closable = true
+    }
+
+    public function get_AutoFlush(): bool
+    {
+        return this.autoFlush
+    }
+
+    public function set_AutoFlush(value: bool)
+    {
+        this.autoFlush = value
+        if value
+        {
+            this.Flush()
+        }
+    }
+
+    public function get_BaseStream(): Stream
+    {
+        return this.stream
+    }
+
+    public function get_Encoding(): Encoding
+    {
+        return this.encoding
+    }
+
+    public function get_FormatProvider(): IFormatProvider
+    {
+        return null
+    }
+
+    public function get_NewLine(): string
+    {
+        return "\n"
+    }
+
+    public function set_NewLine(value: string)
+    {
+    }
+
+    public function Close()
+    {
+        this.Dispose()
+    }
+
+    public function Dispose()
+    {
+        if this.stream != null
+        {
+            this.Flush()
+            if this.closable
+            {
+                this.stream.Close()
+            }
+        }
+        this.stream = null
+        this.encoding = null
+        this.encoder = null
+        this.byteBuffer = null
+        this.charBuffer = null
+    }
+
+    public function Flush()
+    {
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("StreamWriter")
+        }
+        this.FlushBuffer()
+        this.stream.Flush()
+    }
+
+    public function Write(value: bool)
+    {
+        this.Write(value.ToString())
+    }
+
+    public function Write(value: char)
+    {
+        if this.charPos >= this.charLen
+        {
+            this.FlushBuffer()
+        }
+        this.charBuffer[this.charPos] = value
+        this.charPos = this.charPos + 1
+        if this.autoFlush
+        {
+            this.Flush()
+        }
+    }
+
+    public function Write(buffer: char[])
+    {
+        if buffer != null
+        {
+            this.Write(buffer, 0, buffer.Length)
+        }
+    }
+
+    public function Write(buffer: char[], index: int32, count: int32)
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if index < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("index or count")
+        }
+        if buffer.Length - index < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        while count > 0
+        {
+            if this.charPos >= this.charLen
+            {
+                this.FlushBuffer()
+            }
+            var n = this.charLen - this.charPos
+            if n > count
+            {
+                n = count
+            }
+            for var i = 0; i < n; i = i + 1
+            {
+                this.charBuffer[this.charPos + i] = buffer[index + i]
+            }
+            this.charPos = this.charPos + n
+            index = index + n
+            count = count - n
+        }
+        if this.autoFlush
+        {
+            this.Flush()
+        }
+    }
+
+    public function Write(value: int32)
+    {
+        this.Write(value.ToString())
+    }
+
+    public function Write(value: int64)
+    {
+        this.Write(value.ToString())
+    }
+
+    public function Write(value: float32)
+    {
+        this.Write(value.ToString())
+    }
+
+    public function Write(value: float64)
+    {
+        this.Write(value.ToString())
+    }
+
+    public function Write(value: string)
+    {
+        if value != null
+        {
+            var count = value.Length()
+            var index = 0
+            while count > 0
+            {
+                if this.charPos >= this.charLen
+                {
+                    this.FlushBuffer()
+                }
+                var n = this.charLen - this.charPos
+                if n > count
+                {
+                    n = count
+                }
+                for var i = 0; i < n; i = i + 1
+                {
+                    this.charBuffer[this.charPos + i] = value.get_Chars(index + i)
+                }
+                this.charPos = this.charPos + n
+                index = index + n
+                count = count - n
+            }
+            if this.autoFlush
+            {
+                this.Flush()
+            }
+        }
+    }
+
+    public function Write(value: Object)
+    {
+        if value != null
+        {
+            this.Write(value.ToString())
+        }
+    }
+
+    public function Write(format: string, arg0: Object)
+    {
+        this.Write(String.Format(format, arg0))
+    }
+
+    public function Write(format: string, arg0: Object, arg1: Object)
+    {
+        this.Write(String.Format(format, arg0, arg1))
+    }
+
+    public function Write(format: string, arg0: Object, arg1: Object, arg2: Object)
+    {
+        this.Write(String.Format(format, arg0, arg1, arg2))
+    }
+
+    public function WriteLine()
+    {
+        this.Write('\r')
+        this.Write('\n')
+        if this.autoFlush
+        {
+            this.Flush()
+        }
+    }
+
+    public function WriteLine(value: bool)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(value: char)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(buffer: char[])
+    {
+        this.Write(buffer)
+        this.WriteLine()
+    }
+
+    public function WriteLine(buffer: char[], index: int32, count: int32)
+    {
+        this.Write(buffer, index, count)
+        this.WriteLine()
+    }
+
+    public function WriteLine(value: int32)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(value: int64)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(value: float32)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(value: float64)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(value: string)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(value: Object)
+    {
+        this.Write(value)
+        this.WriteLine()
+    }
+
+    public function WriteLine(format: string, arg0: Object)
+    {
+        this.Write(format, arg0)
+        this.WriteLine()
+    }
+
+    public function WriteLine(format: string, arg0: Object, arg1: Object)
+    {
+        this.Write(format, arg0, arg1)
+        this.WriteLine()
+    }
+
+    public function WriteLine(format: string, arg0: Object, arg1: Object, arg2: Object)
+    {
+        this.Write(format, arg0, arg1, arg2)
+        this.WriteLine()
+    }
+
+    private function FlushBuffer()
+    {
+        if this.charPos > 0
+        {
+            if !this.haveWrittenPreamble && this.preamble.Length > 0
+            {
+                this.stream.Write(this.preamble, 0, this.preamble.Length)
+                this.haveWrittenPreamble = true
+            }
+            var byteCount = this.encoder.GetBytes(this.charBuffer, 0, this.charPos, this.byteBuffer, 0, false)
+            this.stream.Write(this.byteBuffer, 0, byteCount)
+            this.charPos = 0
+        }
+    }
+}
+
+public class NullStreamWriter : StreamWriter
+{
+    public function NullStreamWriter()
+    {
+    }
+
+    public function get_AutoFlush(): bool
+    {
+        return false
+    }
+
+    public function set_AutoFlush(value: bool)
+    {
+    }
+
+    public function get_BaseStream(): Stream
+    {
+        return Stream.Null
+    }
+
+    public function get_Encoding(): Encoding
+    {
+        return Encoding.Unicode
+    }
+
+    public function Close()
+    {
+    }
+
+    public function Dispose()
+    {
+    }
+
+    public function Flush()
+    {
+    }
+
+    public function Write(value: char)
+    {
+    }
+
+    public function Write(buffer: char[], index: int32, count: int32)
+    {
+    }
+
+    public function Write(value: string)
+    {
+    }
+}
+
+public abstract class TextWriter
+{
+    public function get_FormatProvider(): IFormatProvider
+    {
+        return null
+    }
+
+    public function get_NewLine(): string
+    {
+        return "\n"
+    }
+
+    public function set_NewLine(value: string)
+    {
+    }
+
+    public function get_Encoding(): Encoding
+    {
+        return Encoding.UTF8
+    }
+
+    public function Close()
+    {
+        this.Dispose()
+    }
+
+    public function Dispose()
+    {
+    }
+
+    public function Flush()
+    {
+    }
+
+    public abstract function Write(value: char)
+    public abstract function Write(buffer: char[], index: int32, count: int32)
+    public abstract function Write(value: string)
+    public abstract function WriteLine()
+}
+
+public abstract class TextReader
+{
+    public function Close()
+    {
+        this.Dispose()
+    }
+
+    public function Dispose()
+    {
+    }
+
+    public abstract function Peek(): int32
+    public abstract function Read(): int32
+    public abstract function Read(buffer: char[], index: int32, count: int32): int32
+    public abstract function ReadLine(): string
+    public abstract function ReadToEnd(): string
+}

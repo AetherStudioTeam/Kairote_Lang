@@ -1,0 +1,227 @@
+namespace System
+
+public class Exception
+{
+    private var message: string
+    private var innerException: Exception
+    private var stackTrace: string
+
+    public function Exception()
+    {
+        this.message = ""
+    }
+
+    public function Exception(message: string)
+    {
+        this.message = message
+    }
+
+    public function Exception(message: string, innerException: Exception)
+    {
+        this.message = message
+        this.innerException = innerException
+    }
+
+    public function get_Message(): string
+    {
+        return this.message
+    }
+
+    public function get_InnerException(): Exception
+    {
+        return this.innerException
+    }
+
+    public function get_StackTrace(): string
+    {
+        return this.stackTrace
+    }
+
+    public virtual function ToString(): string
+    {
+        return this.message
+    }
+}
+
+public class SystemException : Exception
+{
+    public function SystemException(): base()
+    {
+    }
+
+    public function SystemException(message: string): base(message)
+    {
+    }
+
+    public function SystemException(message: string, innerException: Exception): base(message, innerException)
+    {
+    }
+}
+
+public class ArgumentException : SystemException
+{
+    private var paramName: string
+
+    public function ArgumentException(): base()
+    {
+    }
+
+    public function ArgumentException(message: string): base(message)
+    {
+    }
+
+    public function ArgumentException(message: string, paramName: string)
+    {
+        this.message = message
+        this.paramName = paramName
+    }
+
+    public function get_ParamName(): string
+    {
+        return this.paramName
+    }
+}
+
+public class ArgumentNullException : ArgumentException
+{
+    public function ArgumentNullException(): base()
+    {
+    }
+
+    public function ArgumentNullException(paramName: string): base("Argument cannot be null.", paramName)
+    {
+    }
+
+    public function ArgumentNullException(paramName: string, message: string): base(message, paramName)
+    {
+    }
+}
+
+public class ArgumentOutOfRangeException : ArgumentException
+{
+    public function ArgumentOutOfRangeException(): base()
+    {
+    }
+
+    public function ArgumentOutOfRangeException(paramName: string): base("Argument out of range.", paramName)
+    {
+    }
+
+    public function ArgumentOutOfRangeException(paramName: string, message: string): base(message, paramName)
+    {
+    }
+}
+
+public class InvalidOperationException : SystemException
+{
+    public function InvalidOperationException(): base()
+    {
+    }
+
+    public function InvalidOperationException(message: string): base(message)
+    {
+    }
+
+    public function InvalidOperationException(message: string, innerException: Exception): base(message, innerException)
+    {
+    }
+}
+
+public class NullReferenceException : SystemException
+{
+    public function NullReferenceException(): base()
+    {
+    }
+
+    public function NullReferenceException(message: string): base(message)
+    {
+    }
+}
+
+public class IndexOutOfRangeException : SystemException
+{
+    public function IndexOutOfRangeException(): base()
+    {
+    }
+
+    public function IndexOutOfRangeException(message: string): base(message)
+    {
+    }
+}
+
+public class NotImplementedException : SystemException
+{
+    public function NotImplementedException(): base()
+    {
+    }
+
+    public function NotImplementedException(message: string): base(message)
+    {
+    }
+}
+
+public class NotSupportedException : SystemException
+{
+    public function NotSupportedException(): base()
+    {
+    }
+
+    public function NotSupportedException(message: string): base(message)
+    {
+    }
+}
+
+public class OutOfMemoryException : SystemException
+{
+    public function OutOfMemoryException(): base()
+    {
+    }
+
+    public function OutOfMemoryException(message: string): base(message)
+    {
+    }
+}
+
+public class OverflowException : ArithmeticException
+{
+    public function OverflowException(): base()
+    {
+    }
+
+    public function OverflowException(message: string): base(message)
+    {
+    }
+}
+
+public class ArithmeticException : SystemException
+{
+    public function ArithmeticException(): base()
+    {
+    }
+
+    public function ArithmeticException(message: string): base(message)
+    {
+    }
+}
+
+public class DivideByZeroException : ArithmeticException
+{
+    public function DivideByZeroException(): base()
+    {
+    }
+
+    public function DivideByZeroException(message: string): base(message)
+    {
+    }
+}
+
+public class FormatException : SystemException
+{
+    public function FormatException(): base()
+    {
+    }
+
+    public function FormatException(message: string): base(message)
+    {
+    }
+}

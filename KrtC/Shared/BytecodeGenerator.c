@@ -7,7 +7,7 @@
 #define KRT_REALLOC(ptr, size) realloc(ptr, size)
 
 struct KrtBytecodeGenerator {
-    
+    int dummy;
 };
 
 KrtBytecodeGenerator* KrtBytecodeGeneratorCreate(void) {
@@ -93,7 +93,7 @@ bool KrtBytecodeGeneratorSerializeToFile(KrtChunk* chunk, const char* filename) 
     
     uint32_t constant_count = chunk->constants.count;
     fwrite(&constant_count, sizeof(uint32_t), 1, file);
-    for (int i = 0; i < constant_count; i++) {
+    for (uint32_t i = 0; i < constant_count; i++) {
         KrtValue value = chunk->constants.values[i];
         fwrite(&value.type, sizeof(KrtValueType), 1, file);
         

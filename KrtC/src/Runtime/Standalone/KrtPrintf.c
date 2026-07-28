@@ -115,7 +115,7 @@ int KrtVsnprintf(char* str, size_t size, const char* format, va_list ap) {
         int zero_pad = 0;
         int long_flag = 0;
         int long_long_flag = 0;
-        int unsigned_flag = 0;
+
         
         while (*p) {
             if (*p == '-') left_align = 1;
@@ -349,9 +349,7 @@ static void* get_stdout_handle(void) {
     return GetStdHandle(STD_OUTPUT_HANDLE);
 }
 
-static void* get_stderr_handle(void) {
-    return GetStdHandle(STD_ERROR_HANDLE);
-}
+
 
 static int write_console(const char* buffer, size_t size) {
     void* handle = get_stdout_handle();

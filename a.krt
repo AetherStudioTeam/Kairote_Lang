@@ -1,0 +1,10 @@
+namespace Krt;
+
+class Program() {
+    public class main() {
+        class ClassName {
+          // properties and methods
+        }
+    }
+}
+

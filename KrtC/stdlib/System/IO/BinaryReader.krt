@@ -1,0 +1,450 @@
+namespace System.IO
+
+public class BinaryReader
+{
+    private var stream: Stream
+    private var encoding: Encoding
+    private var decoder: Decoder
+    private var buffer: uint8[]
+    private var charBuffer: char[]
+    private var charBytes: uint8[]
+    private var maxCharsSize: int32
+
+    public function BinaryReader(input: Stream)
+    {
+        this.BinaryReader(input, Encoding.UTF8)
+    }
+
+    public function BinaryReader(input: Stream, encoding: Encoding)
+    {
+        this.BinaryReader(input, encoding, false)
+    }
+
+    public function BinaryReader(input: Stream, encoding: Encoding, leaveOpen: bool)
+    {
+        if input == null
+        {
+            throw new ArgumentNullException("input")
+        }
+        if encoding == null
+        {
+            throw new ArgumentNullException("encoding")
+        }
+        if !input.CanRead
+        {
+            throw new ArgumentException("Stream does not support reading")
+        }
+        this.stream = input
+        this.encoding = encoding
+        this.decoder = encoding.GetDecoder()
+        this.buffer = new uint8[16]
+        this.charBuffer = new char[128]
+        this.charBytes = new uint8[128]
+        this.maxCharsSize = encoding.GetMaxCharCount(128)
+    }
+
+    public function get_BaseStream(): Stream
+    {
+        return this.stream
+    }
+
+    public function Close()
+    {
+        this.Dispose()
+    }
+
+    public function Dispose()
+    {
+        if this.stream != null
+        {
+            this.stream.Close()
+            this.stream = null
+            this.buffer = null
+            this.charBuffer = null
+            this.charBytes = null
+        }
+    }
+
+    public function PeekChar(): int32
+    {
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        if !this.stream.CanSeek
+        {
+            return -1
+        }
+        var origPos = this.stream.Position
+        var ch = this.Read()
+        this.stream.Position = origPos
+        return ch
+    }
+
+    public function Read(): int32
+    {
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        var charsRead = 0
+        var numBytes = 0
+        var index = 0
+        while charsRead == 0
+        {
+            numBytes = numBytes + this.stream.Read(this.charBytes, index, 1)
+            if numBytes == 0
+            {
+                return -1
+            }
+            try
+            {
+                charsRead = this.decoder.GetChars(this.charBytes, 0, numBytes, this.charBuffer, 0)
+            }
+            catch
+            {
+                index = index + 1
+                if index >= this.charBytes.Length
+                {
+                    throw
+                }
+            }
+        }
+        if charsRead == 0
+        {
+            return -1
+        }
+        return int32(this.charBuffer[0])
+    }
+
+    public function Read(buffer: bool[], index: int32, count: int32): int32
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if index < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("index or count")
+        }
+        if buffer.Length - index < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        for var i = 0; i < count; i = i + 1
+        {
+            buffer[index + i] = this.ReadBoolean()
+        }
+        return count
+    }
+
+    public function Read(buffer: char[], index: int32, count: int32): int32
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if index < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("index or count")
+        }
+        if buffer.Length - index < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        var numBytes = 0
+        for var i = 0; i < count; i = i + 1
+        {
+            var b = this.stream.ReadByte()
+            if b == -1
+            {
+                return i
+            }
+            this.charBytes[0] = uint8(b)
+            var charsRead = this.decoder.GetChars(this.charBytes, 0, 1, this.charBuffer, 0)
+            if charsRead > 0
+            {
+                buffer[index + i] = this.charBuffer[0]
+            }
+        }
+        return count
+    }
+
+    public function Read(buffer: uint8[], index: int32, count: int32): int32
+    {
+        if buffer == null
+        {
+            throw new ArgumentNullException("buffer")
+        }
+        if index < 0 || count < 0
+        {
+            throw new ArgumentOutOfRangeException("index or count")
+        }
+        if buffer.Length - index < count
+        {
+            throw new ArgumentException("Buffer too small")
+        }
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        return this.stream.Read(buffer, index, count)
+    }
+
+    public function ReadBoolean(): bool
+    {
+        this.FillBuffer(1)
+        return this.buffer[0] != 0
+    }
+
+    public function ReadByte(): uint8
+    {
+        var b = this.stream.ReadByte()
+        if b == -1
+        {
+            throw new EndOfStreamException()
+        }
+        return uint8(b)
+    }
+
+    public function ReadSByte(): int8
+    {
+        this.FillBuffer(1)
+        return int8(this.buffer[0])
+    }
+
+    public function ReadBytes(count: int32): uint8[]
+    {
+        if count < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        var result = new uint8[count]
+        var numRead = 0
+        while numRead < count
+        {
+            var n = this.stream.Read(result, numRead, count - numRead)
+            if n == 0
+            {
+                break
+            }
+            numRead = numRead + n
+        }
+        if numRead != count
+        {
+            var copy = new uint8[numRead]
+            for var i = 0; i < numRead; i = i + 1
+            {
+                copy[i] = result[i]
+            }
+            return copy
+        }
+        return result
+    }
+
+    public function ReadChar(): char
+    {
+        var ch = this.Read()
+        if ch == -1
+        {
+            throw new EndOfStreamException()
+        }
+        return char(ch)
+    }
+
+    public function ReadChars(count: int32): char[]
+    {
+        if count < 0
+        {
+            throw new ArgumentOutOfRangeException("count")
+        }
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        var result = new char[count]
+        var numRead = 0
+        while numRead < count
+        {
+            var n = this.Read(result, numRead, count - numRead)
+            if n == 0
+            {
+                break
+            }
+            numRead = numRead + n
+        }
+        if numRead != count
+        {
+            var copy = new char[numRead]
+            for var i = 0; i < numRead; i = i + 1
+            {
+                copy[i] = result[i]
+            }
+            return copy
+        }
+        return result
+    }
+
+    public function ReadInt16(): int16
+    {
+        this.FillBuffer(2)
+        return int16(this.buffer[0]) | (int16(this.buffer[1]) << 8)
+    }
+
+    public function ReadUInt16(): uint16
+    {
+        this.FillBuffer(2)
+        return uint16(this.buffer[0]) | (uint16(this.buffer[1]) << 8)
+    }
+
+    public function ReadInt32(): int32
+    {
+        this.FillBuffer(4)
+        return int32(this.buffer[0]) | (int32(this.buffer[1]) << 8) | (int32(this.buffer[2]) << 16) | (int32(this.buffer[3]) << 24)
+    }
+
+    public function ReadUInt32(): uint32
+    {
+        this.FillBuffer(4)
+        return uint32(this.buffer[0]) | (uint32(this.buffer[1]) << 8) | (uint32(this.buffer[2]) << 16) | (uint32(this.buffer[3]) << 24)
+    }
+
+    public function ReadInt64(): int64
+    {
+        this.FillBuffer(8)
+        var lo = uint32(this.buffer[0]) | (uint32(this.buffer[1]) << 8) | (uint32(this.buffer[2]) << 16) | (uint32(this.buffer[3]) << 24)
+        var hi = uint32(this.buffer[4]) | (uint32(this.buffer[5]) << 8) | (uint32(this.buffer[6]) << 16) | (uint32(this.buffer[7]) << 24)
+        return int64(lo) | (int64(hi) << 32)
+    }
+
+    public function ReadUInt64(): uint64
+    {
+        this.FillBuffer(8)
+        var lo = uint32(this.buffer[0]) | (uint32(this.buffer[1]) << 8) | (uint32(this.buffer[2]) << 16) | (uint32(this.buffer[3]) << 24)
+        var hi = uint32(this.buffer[4]) | (uint32(this.buffer[5]) << 8) | (uint32(this.buffer[6]) << 16) | (uint32(this.buffer[7]) << 24)
+        return uint64(lo) | (uint64(hi) << 32)
+    }
+
+    public function ReadSingle(): float32
+    {
+        this.FillBuffer(4)
+        return unsafe_convert_uint32_to_float32(uint32(this.buffer[0]) | (uint32(this.buffer[1]) << 8) | (uint32(this.buffer[2]) << 16) | (uint32(this.buffer[3]) << 24))
+    }
+
+    public function ReadDouble(): float64
+    {
+        this.FillBuffer(8)
+        var lo = uint32(this.buffer[0]) | (uint32(this.buffer[1]) << 8) | (uint32(this.buffer[2]) << 16) | (uint32(this.buffer[3]) << 24)
+        var hi = uint32(this.buffer[4]) | (uint32(this.buffer[5]) << 8) | (uint32(this.buffer[6]) << 16) | (uint32(this.buffer[7]) << 24)
+        var bits = uint64(lo) | (uint64(hi) << 32)
+        return unsafe_convert_uint64_to_float64(bits)
+    }
+
+    public function ReadDecimal(): Decimal
+    {
+        this.FillBuffer(16)
+        var flags = int32(this.buffer[0]) | (int32(this.buffer[1]) << 8) | (int32(this.buffer[2]) << 16) | (int32(this.buffer[3]) << 24)
+        var hi = int32(this.buffer[4]) | (int32(this.buffer[5]) << 8) | (int32(this.buffer[6]) << 16) | (int32(this.buffer[7]) << 24)
+        var lo = int32(this.buffer[8]) | (int32(this.buffer[9]) << 8) | (int32(this.buffer[10]) << 16) | (int32(this.buffer[11]) << 24)
+        var mid = int32(this.buffer[12]) | (int32(this.buffer[13]) << 8) | (int32(this.buffer[14]) << 16) | (int32(this.buffer[15]) << 24)
+        return new Decimal(lo, mid, hi, flags)
+    }
+
+    public function ReadString(): string
+    {
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        var currPos = 0
+        var n = 0
+        var stringLength = this.Read7BitEncodedInt()
+        if stringLength < 0
+        {
+            throw new IOException("Invalid string length")
+        }
+        if stringLength == 0
+        {
+            return ""
+        }
+        var charsRead = 0
+        var chars = new char[stringLength]
+        while charsRead < stringLength
+        {
+            var readLength = stringLength - charsRead
+            if readLength > this.charBuffer.Length
+            {
+                readLength = this.charBuffer.Length
+            }
+            var bytesRead = this.Read(this.charBytes, 0, readLength)
+            if bytesRead == 0
+            {
+                throw new EndOfStreamException()
+            }
+            var decoded = this.decoder.GetChars(this.charBytes, 0, bytesRead, chars, charsRead)
+            charsRead = charsRead + decoded
+        }
+        return new String(chars)
+    }
+
+    private function FillBuffer(numBytes: int32)
+    {
+        if this.stream == null
+        {
+            throw new ObjectDisposedException("BinaryReader")
+        }
+        if numBytes < 0 || numBytes > this.buffer.Length
+        {
+            throw new ArgumentOutOfRangeException("numBytes")
+        }
+        var bytesRead = 0
+        var n = 0
+        while bytesRead < numBytes
+        {
+            n = this.stream.Read(this.buffer, bytesRead, numBytes - bytesRead)
+            if n == 0
+            {
+                throw new EndOfStreamException()
+            }
+            bytesRead = bytesRead + n
+        }
+    }
+
+    private function Read7BitEncodedInt(): int32
+    {
+        var count = 0
+        var shift = 0
+        var b = 0
+        while true
+        {
+            if shift == 35
+            {
+                throw new FormatException("Invalid 7-bit encoded integer")
+            }
+            b = this.stream.ReadByte()
+            if b == -1
+            {
+                throw new EndOfStreamException()
+            }
+            count = count | ((b & 0x7F) << shift)
+            shift = shift + 7
+            if (b & 0x80) == 0
+            {
+                break
+            }
+        }
+        return count
+    }
+}

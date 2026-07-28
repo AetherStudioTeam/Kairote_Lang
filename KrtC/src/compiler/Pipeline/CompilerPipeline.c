@@ -1,10 +1,12 @@
 #include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 extern void* memset(void* s, int c, size_t n);
 
 #include <string.h>
 #include "CompilerPipeline.h"
-#include "../../Core/Utils/logger.h"
+#include "../../Core/Utils/Logger.h"
 #include "../Frontend/FrontendTemp/FrontendTemp/semantic/Generics.h"
 #include "../Frontend/FrontendTemp/FrontendTemp/semantic/NameMangling.h"
 #include <stdlib.h>
@@ -33,7 +35,12 @@ static void load_standard_macros(Preprocessor* preprocessor) {
     PreprocessorAddMacro(preprocessor, "print_int", "Console.WriteInt");
 }
 
-static ASTNode* load_single_stdlib_file(const char* file_path);
+typedef struct {
+    ASTNode* ast;
+    Parser* parser;
+} StdlibParseResult;
+
+static StdlibParseResult load_single_stdlib_file(const char* file_path);
 static ASTNode* merge_ast(ASTNode* main_ast, ASTNode* stdlib_ast);
 
 #ifdef _WIN32
@@ -117,10 +124,12 @@ static int scan_stdlib_directory(const char* dir_path, char** file_list, int max
     return 1;
 }
 
-static ASTNode* load_single_stdlib_file(const char* file_path) {
+static StdlibParseResult load_single_stdlib_file(const char* file_path) {
+    StdlibParseResult result = { NULL, NULL };
+    
     FILE* fp = fopen(file_path, "r");
     if (!fp) {
-        return NULL;
+        return result;
     }
     
     fseek(fp, 0, SEEK_END);
@@ -130,7 +139,7 @@ static ASTNode* load_single_stdlib_file(const char* file_path) {
     char* source_code = (char*)KRT_MALLOC((size_t)file_size + 1);
     if (!source_code) {
         fclose(fp);
-        return NULL;
+        return result;
     }
     
     size_t read_bytes = fread(source_code, 1, (size_t)file_size, fp);
@@ -140,7 +149,7 @@ static ASTNode* load_single_stdlib_file(const char* file_path) {
     Preprocessor* preprocessor = PreprocessorCreate();
     if (!preprocessor) {
         KRT_FREE(source_code);
-        return NULL;
+        return result;
     }
     
     load_standard_macros(preprocessor);
@@ -149,33 +158,31 @@ static ASTNode* load_single_stdlib_file(const char* file_path) {
     KRT_FREE(source_code);
     
     if (!processed_source) {
-        return NULL;
+        return result;
     }
+    
+    printf("[DEBUG] Processed source for %s:\n%s\n[END]\n", file_path, processed_source);
     
     Lexer* lexer = lexer_create(processed_source);
     if (!lexer) {
         KRT_FREE(processed_source);
-        return NULL;
+        return result;
     }
     
-    Parser* parser = parser_create(lexer);  
+    Parser* parser = parser_create(lexer);
     if (!parser) {
         KRT_FREE(processed_source);
         lexer_destroy(lexer);
-        return NULL;
+        return result;
     }
     
-    ASTNode* stdlib_ast = parser_parse(parser);
+    result.ast = parser_parse(parser);
+    result.parser = parser;
     
     KRT_FREE(processed_source);
     lexer_destroy(lexer);
-    parser_destroy(parser);
     
-    if (!stdlib_ast) {
-        return NULL;
-    }
-
-    return stdlib_ast;
+    return result;
 }
 
 static ASTNode* load_standard_library(const char* stdlib_path) {
@@ -192,21 +199,47 @@ static ASTNode* load_standard_library(const char* stdlib_path) {
         return NULL;
     }
     
+    StdlibParseResult* results = (StdlibParseResult*)KRT_CALLOC((size_t)file_count, sizeof(StdlibParseResult));
+    if (!results) {
+        for (int i = 0; i < file_count; i++) {
+            free(file_list[i]);
+        }
+        return NULL;
+    }
+    
     ASTNode* merged_ast = NULL;
+    int result_count = 0;
     
     for (int i = 0; i < file_count; i++) {
-        ASTNode* file_ast = load_single_stdlib_file(file_list[i]);
-        if (file_ast) {
-            if (!merged_ast) {
-                merged_ast = file_ast;
-            } else {
-                merged_ast = merge_ast(merged_ast, file_ast);
-                
-                ast_destroy_node(file_ast);
+        printf("[DEBUG] Loading stdlib file: %s\n", file_list[i]);
+        results[result_count] = load_single_stdlib_file(file_list[i]);
+        printf("[DEBUG] File %s: ast=%p\n", file_list[i], (void*)results[result_count].ast);
+        if (results[result_count].ast) {
+            if (results[result_count].ast->type == AST_PROGRAM) {
+                printf("[DEBUG] File %s: statement_count=%d\n", file_list[i], results[result_count].ast->data.block.statement_count);
+                for (int j = 0; j < results[result_count].ast->data.block.statement_count && j < 5; j++) {
+                    ASTNode* stmt = results[result_count].ast->data.block.statements[j];
+                    printf("[DEBUG] File %s: stmt[%d] type=%d\n", file_list[i], j, stmt ? (int)stmt->type : -1);
+                }
             }
+            if (!merged_ast) {
+                merged_ast = results[result_count].ast;
+            } else {
+                merged_ast = merge_ast(merged_ast, results[result_count].ast);
+            }
+            result_count++;
+        } else if (results[result_count].parser) {
+            parser_destroy(results[result_count].parser);
         }
         free(file_list[i]);
     }
+    
+    // NOTE: We intentionally do NOT destroy parsers whose AST was successfully merged.
+    // The AST nodes are allocated from the parser's arena, so destroying the parser
+    // would invalidate all the nodes. The parsers will be cleaned up when the process exits.
+    // Only destroy parsers that failed to parse (already handled above).
+    
+    KRT_FREE(results);
     
     return merged_ast;
 }
@@ -628,14 +661,16 @@ int KrtCompilePipelineExecute(KrtCompilePipeline* pipeline, const char* input_fi
 #endif
         
         char stdlib_path[1024];
-        snprintf(stdlib_path, sizeof(stdlib_path), "%s\\..\\stdlib", exe_dir);
+        char exe_dir_truncated[1010];
+        strncpy(exe_dir_truncated, exe_dir, sizeof(exe_dir_truncated) - 1);
+        exe_dir_truncated[sizeof(exe_dir_truncated) - 1] = '\0';
+        snprintf(stdlib_path, sizeof(stdlib_path), "%s\\..\\stdlib", exe_dir_truncated);
         
         struct stat stdlib_stat;
         if (stat(stdlib_path, &stdlib_stat) == 0 && (stdlib_stat.st_mode & S_IFDIR)) {
             ASTNode* stdlib_ast = load_standard_library(stdlib_path);
             if (stdlib_ast) {
                 pipeline->ast = merge_ast(pipeline->ast, stdlib_ast);
-                ast_destroy_node(stdlib_ast);
             }
         }
     }

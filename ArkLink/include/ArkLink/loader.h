@@ -56,6 +56,8 @@ typedef enum ArkSectionKind {
     ARK_SECTION_DATA = 2,
     ARK_SECTION_RODATA = 3,
     ARK_SECTION_BSS = 4,
+    ARK_SECTION_TDATA = 5,   /* TLS initialized data  (.tdata) */
+    ARK_SECTION_TBSS  = 6,   /* TLS zero-init data    (.tbss)  */
 } ArkSectionKind;
 
 typedef struct ArkSectionRange {

@@ -1,0 +1,699 @@
+namespace System.Threading.Tasks
+
+public class Task
+{
+    private var action: Action
+    private var state: Object
+    private var status: TaskStatus
+    private var exception: Exception
+    private var isCompleted: bool
+    private var isCanceled: bool
+    private var isFaulted: bool
+    private var continuationActions: List<Action>
+
+    public static var Factory: TaskFactory = new TaskFactory()
+    public static var CompletedTask: Task = new Task(() => {}, null)
+
+    public function Task(action: Action)
+    {
+        this.Task(action, null)
+    }
+
+    public function Task(action: Action, state: Object)
+    {
+        this.action = action
+        this.state = state
+        this.status = TaskStatus.Created
+        this.isCompleted = false
+        this.isCanceled = false
+        this.isFaulted = false
+        this.continuationActions = new List<Action>()
+    }
+
+    public function get_Status(): TaskStatus
+    {
+        return this.status
+    }
+
+    public function get_IsCompleted(): bool
+    {
+        return this.isCompleted
+    }
+
+    public function get_IsCanceled(): bool
+    {
+        return this.isCanceled
+    }
+
+    public function get_IsFaulted(): bool
+    {
+        return this.isFaulted
+    }
+
+    public function get_IsCompletedSuccessfully(): bool
+    {
+        return this.isCompleted && !this.isCanceled && !this.isFaulted
+    }
+
+    public function get_Exception(): Exception
+    {
+        return this.exception
+    }
+
+    public function get_AsyncState(): Object
+    {
+        return this.state
+    }
+
+    public function Start()
+    {
+        this.Start(TaskScheduler.Current)
+    }
+
+    public function Start(scheduler: TaskScheduler)
+    {
+        if this.status != TaskStatus.Created)
+        {
+            throw new InvalidOperationException("Task already started")
+        }
+        this.status = TaskStatus.WaitingToRun
+        scheduler.QueueTask(this)
+    }
+
+    public function RunSynchronously()
+    {
+        this.RunSynchronously(TaskScheduler.Current)
+    }
+
+    public function RunSynchronously(scheduler: TaskScheduler)
+    {
+        if this.status != TaskStatus.Created)
+        {
+            throw new InvalidOperationException("Task already started")
+        }
+        this.status = TaskStatus.Running
+        this.Execute()
+    }
+
+    public function Wait()
+    {
+        this.Wait(Timeout.Infinite)
+    }
+
+    public function Wait(millisecondsTimeout: int32): bool
+    {
+        if this.isCompleted)
+        {
+            return true
+        }
+        var startTime = Environment.TickCount
+        while !this.isCompleted)
+        {
+            if millisecondsTimeout != Timeout.Infinite)
+            {
+                var elapsed = Environment.TickCount - startTime
+                if elapsed >= millisecondsTimeout)
+                {
+                    return false
+                }
+            }
+            Thread.Sleep(1)
+        }
+        return true
+    }
+
+    public function Wait(cancellationToken: CancellationToken)
+    {
+        this.Wait()
+        cancellationToken.ThrowIfCancellationRequested()
+    }
+
+    public function ContinueWith(continuationAction: Action<Task>): Task
+    {
+        var continuation = new Task(() => continuationAction(this), null)
+        if this.isCompleted)
+        {
+            continuation.Start()
+        }
+        else
+        {
+            this.continuationActions.Add(() => continuation.Start())
+        }
+        return continuation
+    }
+
+    public function ContinueWith<TResult>(continuationFunction: Func<Task, TResult>): Task<TResult>
+    {
+        var result = default(TResult)
+        var continuation = new Task<TResult>(() => result = continuationFunction(this), null)
+        if this.isCompleted)
+        {
+            continuation.Start()
+        }
+        else
+        {
+            this.continuationActions.Add(() => continuation.Start())
+        }
+        return continuation
+    }
+
+    internal function Execute()
+    {
+        this.status = TaskStatus.Running
+        try
+        {
+            if this.action != null)
+            {
+                this.action()
+            }
+            this.status = TaskStatus.RanToCompletion
+        }
+        catch ex: Exception)
+        {
+            this.exception = ex
+            this.isFaulted = true
+            this.status = TaskStatus.Faulted
+        }
+        this.isCompleted = true
+        for var i = 0; i < this.continuationActions.Length; i = i + 1)
+        {
+            this.continuationActions[i]()
+        }
+    }
+
+    public static function Run(action: Action): Task
+    {
+        var task = new Task(action)
+        task.Start()
+        return task
+    }
+
+    public static function Run<TResult>(function: Func<TResult>): Task<TResult>
+    {
+        var result = default(TResult)
+        var task = new Task<TResult>(() => result = function(), null)
+        task.Start()
+        return task
+    }
+
+    public static function Delay(millisecondsDelay: int32): Task
+    {
+        return Task.Delay(TimeSpan.FromMilliseconds(float64(millisecondsDelay)))
+    }
+
+    public static function Delay(delay: TimeSpan): Task
+    {
+        var task = new Task(() => Thread.Sleep(delay), null)
+        task.Start()
+        return task
+    }
+
+    public static function Delay(millisecondsDelay: int32, cancellationToken: CancellationToken): Task
+    {
+        return Task.Delay(millisecondsDelay)
+    }
+
+    public static function WhenAll(tasks: Task[]): Task
+    {
+        return Task.Run(() =>
+        {
+            for var i = 0; i < tasks.Length; i = i + 1)
+            {
+                tasks[i].Wait()
+            }
+        })
+    }
+
+    public static function WhenAll<TResult>(tasks: Task<TResult>[]): Task<TResult[]>
+    {
+        return Task.Run<TResult[]>(() =>
+        {
+            var results = new TResult[tasks.Length]
+            for var i = 0; i < tasks.Length; i = i + 1)
+            {
+                tasks[i].Wait()
+                results[i] = tasks[i].Result
+            }
+            return results
+        })
+    }
+
+    public static function WhenAny(tasks: Task[]): Task<Task>
+    {
+        return Task.Run<Task>(() =>
+        {
+            while true)
+            {
+                for var i = 0; i < tasks.Length; i = i + 1)
+                {
+                    if tasks[i].IsCompleted)
+                    {
+                        return tasks[i]
+                    }
+                }
+                Thread.Sleep(1)
+            }
+            return null
+        })
+    }
+
+    public static function FromResult<TResult>(result: TResult): Task<TResult>
+    {
+        var task = new Task<TResult>(() => result, null)
+        task.RunSynchronously()
+        return task
+    }
+
+    public static function FromException(exception: Exception): Task
+    {
+        var task = new Task(() => {}, null)
+        task.exception = exception
+        task.isFaulted = true
+        task.isCompleted = true
+        task.status = TaskStatus.Faulted
+        return task
+    }
+
+    public static function FromCanceled(cancellationToken: CancellationToken): Task
+    {
+        var task = new Task(() => {}, null)
+        task.isCanceled = true
+        task.isCompleted = true
+        task.status = TaskStatus.Canceled
+        return task
+    }
+}
+
+public class Task<TResult> : Task
+{
+    private var result: TResult
+    private var resultFunction: Func<TResult>
+
+    public function Task(function: Func<TResult>)
+    {
+        this.Task(function, null)
+    }
+
+    public function Task(function: Func<TResult>, state: Object)
+    {
+        this.resultFunction = function
+        this.state = state
+        this.status = TaskStatus.Created
+        this.isCompleted = false
+        this.isCanceled = false
+        this.isFaulted = false
+        this.continuationActions = new List<Action>()
+    }
+
+    public function get_Result(): TResult
+    {
+        this.Wait()
+        if this.isFaulted)
+        {
+            throw this.exception
+        }
+        if this.isCanceled)
+        {
+            throw new OperationCanceledException()
+        }
+        return this.result
+    }
+
+    internal function Execute()
+    {
+        this.status = TaskStatus.Running
+        try
+        {
+            if this.resultFunction != null)
+            {
+                this.result = this.resultFunction()
+            }
+            this.status = TaskStatus.RanToCompletion
+        }
+        catch ex: Exception)
+        {
+            this.exception = ex
+            this.isFaulted = true
+            this.status = TaskStatus.Faulted
+        }
+        this.isCompleted = true
+        for var i = 0; i < this.continuationActions.Length; i = i + 1)
+        {
+            this.continuationActions[i]()
+        }
+    }
+
+    public function ContinueWith(continuationAction: Action<Task<TResult>>): Task
+    {
+        var continuation = new Task(() => continuationAction(this), null)
+        if this.isCompleted)
+        {
+            continuation.Start()
+        }
+        else
+        {
+            this.continuationActions.Add(() => continuation.Start())
+        }
+        return continuation
+    }
+
+    public function ContinueWith<TNewResult>(continuationFunction: Func<Task<TResult>, TNewResult>): Task<TNewResult>
+    {
+        var result = default(TNewResult)
+        var continuation = new Task<TNewResult>(() => result = continuationFunction(this), null)
+        if this.isCompleted)
+        {
+            continuation.Start()
+        }
+        else
+        {
+            this.continuationActions.Add(() => continuation.Start())
+        }
+        return continuation
+    }
+}
+
+public enum TaskStatus
+{
+    Created = 0
+    WaitingForActivation = 1
+    WaitingToRun = 2
+    Running = 3
+    WaitingForChildrenToComplete = 4
+    RanToCompletion = 5
+    Canceled = 6
+    Faulted = 7
+}
+
+public class TaskFactory
+{
+    public function StartNew(action: Action): Task
+    {
+        var task = new Task(action)
+        task.Start()
+        return task
+    }
+
+    public function StartNew<TResult>(function: Func<TResult>): Task<TResult>
+    {
+        var task = new Task<TResult>(function)
+        task.Start()
+        return task
+    }
+
+    public function StartNew(action: Action, cancellationToken: CancellationToken): Task
+    {
+        return this.StartNew(action)
+    }
+
+    public function StartNew<TResult>(function: Func<TResult>, cancellationToken: CancellationToken): Task<TResult>
+    {
+        return this.StartNew<TResult>(function)
+    }
+
+    public function ContinueWhenAll(tasks: Task[], continuationAction: Action<Task[]>): Task
+    {
+        return Task.WhenAll(tasks).ContinueWith(t => continuationAction(tasks))
+    }
+
+    public function ContinueWhenAny(tasks: Task[], continuationAction: Action<Task>): Task
+    {
+        return Task.WhenAny(tasks).ContinueWith(t => continuationAction(t.Result))
+    }
+}
+
+public abstract class TaskScheduler
+{
+    public static var Default: TaskScheduler = new ThreadPoolTaskScheduler()
+    public static var Current: TaskScheduler = TaskScheduler.Default
+
+    public abstract function QueueTask(task: Task)
+    public abstract function TryExecuteTaskInline(task: Task, taskWasPreviouslyQueued: bool): bool
+    public abstract function GetScheduledTasks(): IEnumerable<Task>
+
+    public function TryDequeue(task: Task): bool
+    {
+        return false
+    }
+
+    protected function TryExecuteTask(task: Task): bool
+    {
+        task.Execute()
+        return true
+    }
+}
+
+public class ThreadPoolTaskScheduler : TaskScheduler
+{
+    public function QueueTask(task: Task)
+    {
+        ThreadPool.QueueUserWorkItem(() => this.TryExecuteTask(task))
+    }
+
+    public function TryExecuteTaskInline(task: Task, taskWasPreviouslyQueued: bool): bool
+    {
+        return false
+    }
+
+    public function GetScheduledTasks(): IEnumerable<Task>
+    {
+        return new List<Task>()
+    }
+}
+
+public class ThreadPool
+{
+    private static var minThreads: int32 = 4
+    private static var maxThreads: int32 = 100
+    private static var activeThreads: int32 = 0
+    private static var workQueue: List<Action> = new List<Action>()
+    private static var queueLock: Object = new Object()
+
+    public static function QueueUserWorkItem(callBack: WaitCallback)
+    {
+        ThreadPool.QueueUserWorkItem(callBack, null)
+    }
+
+    public static function QueueUserWorkItem(callBack: WaitCallback, state: Object): bool
+    {
+        lock ThreadPool.queueLock)
+        {
+            ThreadPool.workQueue.Add(() => callBack(state))
+        }
+        ThreadPool.EnsureThreads()
+        return true
+    }
+
+    public static function GetMinThreads(workerThreads: int32, completionPortThreads: int32)
+    {
+        workerThreads = ThreadPool.minThreads
+        completionPortThreads = ThreadPool.minThreads
+    }
+
+    public static function SetMinThreads(workerThreads: int32, completionPortThreads: int32): bool
+    {
+        if workerThreads < 1 || completionPortThreads < 1)
+        {
+            return false
+        }
+        ThreadPool.minThreads = workerThreads
+        return true
+    }
+
+    public static function GetMaxThreads(workerThreads: int32, completionPortThreads: int32)
+    {
+        workerThreads = ThreadPool.maxThreads
+        completionPortThreads = ThreadPool.maxThreads
+    }
+
+    public static function SetMaxThreads(workerThreads: int32, completionPortThreads: int32): bool
+    {
+        if workerThreads < ThreadPool.minThreads || completionPortThreads < ThreadPool.minThreads)
+        {
+            return false
+        }
+        ThreadPool.maxThreads = workerThreads
+        return true
+    }
+
+    public static function GetAvailableThreads(workerThreads: int32, completionPortThreads: int32)
+    {
+        workerThreads = ThreadPool.maxThreads - ThreadPool.activeThreads
+        completionPortThreads = ThreadPool.maxThreads - ThreadPool.activeThreads
+    }
+
+    private static function EnsureThreads()
+    {
+        if ThreadPool.activeThreads < ThreadPool.maxThreads)
+        {
+            var newThread = new Thread(() => ThreadPool.WorkerLoop())
+            newThread.IsBackground = true
+            newThread.Start()
+            Interlocked.Increment(ThreadPool.activeThreads)
+        }
+    }
+
+    private static function WorkerLoop()
+    {
+        while true)
+        {
+            var work: Action = null
+            lock ThreadPool.queueLock)
+            {
+                if ThreadPool.workQueue.Length > 0)
+                {
+                    work = ThreadPool.workQueue[0]
+                    ThreadPool.workQueue.RemoveAt(0)
+                }
+            }
+            if work != null)
+            {
+                work()
+            }
+            else
+            {
+                Thread.Sleep(10)
+            }
+        }
+    }
+}
+
+public delegate function WaitCallback(state: Object)
+
+public class CancellationToken
+{
+    private var isCancellationRequested: bool
+    private var callbacks: List<Action>
+
+    public static var None: CancellationToken = new CancellationToken()
+
+    public function CancellationToken()
+    {
+        this.isCancellationRequested = false
+        this.callbacks = new List<Action>()
+    }
+
+    public function get_IsCancellationRequested(): bool
+    {
+        return this.isCancellationRequested
+    }
+
+    public function get_CanBeCanceled(): bool
+    {
+        return true
+    }
+
+    public function ThrowIfCancellationRequested()
+    {
+        if this.isCancellationRequested)
+        {
+            throw new OperationCanceledException()
+        }
+    }
+
+    public function Register(callback: Action): CancellationTokenRegistration
+    {
+        if this.isCancellationRequested)
+        {
+            callback()
+        }
+        else
+        {
+            this.callbacks.Add(callback)
+        }
+        return new CancellationTokenRegistration()
+    }
+
+    internal function Cancel()
+    {
+        this.isCancellationRequested = true
+        for var i = 0; i < this.callbacks.Length; i = i + 1)
+        {
+            this.callbacks[i]()
+        }
+    }
+}
+
+public class CancellationTokenSource
+{
+    private var token: CancellationToken
+    private var isDisposed: bool
+
+    public function CancellationTokenSource()
+    {
+        this.token = new CancellationToken()
+    }
+
+    public function get_Token(): CancellationToken
+    {
+        return this.token
+    }
+
+    public function get_IsCancellationRequested(): bool
+    {
+        return this.token.IsCancellationRequested
+    }
+
+    public function Cancel()
+    {
+        this.token.Cancel()
+    }
+
+    public function Cancel(throwOnFirstException: bool)
+    {
+        this.Cancel()
+    }
+
+    public function CancelAfter(millisecondsDelay: int32)
+    {
+        Thread.Sleep(millisecondsDelay)
+        this.Cancel()
+    }
+
+    public function CancelAfter(delay: TimeSpan)
+    {
+        this.CancelAfter(int32(delay.get_TotalMilliseconds()))
+    }
+
+    public function Dispose()
+    {
+        this.isDisposed = true
+    }
+
+    public static function CreateLinkedTokenSource(tokens: CancellationToken[]): CancellationTokenSource
+    {
+        var source = new CancellationTokenSource()
+        for var i = 0; i < tokens.Length; i = i + 1)
+        {
+            if tokens[i].IsCancellationRequested)
+            {
+                source.Cancel()
+                break
+            }
+        }
+        return source
+    }
+}
+
+public struct CancellationTokenRegistration
+{
+    public function Dispose()
+    {
+    }
+}
+
+public class OperationCanceledException : Exception
+{
+    public function OperationCanceledException()
+    {
+    }
+
+    public function OperationCanceledException(message: string)
+    {
+        this.Message = message
+    }
+
+    public function OperationCanceledException(token: CancellationToken)
+    {
+    }
+}

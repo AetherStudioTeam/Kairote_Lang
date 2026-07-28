@@ -1,8 +1,6 @@
-#ifndef _WIN32
-#define _POSIX_C_SOURCE 200809L
-#endif
 #ifndef KRT_COMMON_H
 #define KRT_COMMON_H
+
 
 #define KRT_VERSION_MAJOR 1
 #define KRT_VERSION_MINOR 0
@@ -221,7 +219,5 @@ int KrtPathJoin(char* result, size_t size, const char* path1, const char* path2)
 int KrtEnsureDirectoryRecursive(const char* path);
 
 #define KRT_COMPILER_INFO (KRT_PLATFORM_NAME "-" KRT_ARCH_NAME " " KRT_VERSION_STRING)
-
-#define printf KrtPrintf
 
 #endif

@@ -267,24 +267,27 @@ ArkLinkResult ark_resolver_resolve(ArkLinkContext* ctx, ArkLinkUnit* const* unit
     out_plan->backend_input->entry_section = 1; 
     out_plan->backend_input->entry_offset = 0;
     
-    ArkResolverSymbol* entry_sym = find_symbol(&sym_table, "main");
+    ArkResolverSymbol* entry_sym = find_symbol(&sym_table, "_start");
     if (!entry_sym) {
-        entry_sym = find_symbol(&sym_table, "_ZN4mainEv");
+        entry_sym = find_symbol(&sym_table, "main");
+        if (!entry_sym) {
+            entry_sym = find_symbol(&sym_table, "_ZN4mainEv");
+        }
     }
-    
+
     if (entry_sym) {
-        
+
         out_plan->backend_input->entry_section = entry_sym->section_index + 1;
         out_plan->backend_input->entry_offset = entry_sym->value;
         fprintf(stderr, "[ArkLink] Entry point: symbol=%s, section=%u, offset=0x%x\n",
                 entry_sym->name, out_plan->backend_input->entry_section, out_plan->backend_input->entry_offset);
     } else {
-        fprintf(stderr, "[ArkLink] Warning: No entry point symbol found (main or _ZN4mainEv), using default\n");
+        fprintf(stderr, "[ArkLink] Warning: No entry point symbol found (_start, main or _ZN4mainEv), using default\n");
     }
 
     for (size_t i = 0; i < sym_table.symbol_count; i++) {
         ArkResolverSymbol* sym = &sym_table.symbols[i];
-        if (sym->section_index >= 0 && sym->section_index < total_sections) {
+        if (sym->section_index < total_sections) {
             sym->section = &out_plan->backend_input->sections[sym->section_index];
         }
     }
@@ -385,6 +388,7 @@ ArkLinkResult ark_resolver_resolve(ArkLinkContext* ctx, ArkLinkUnit* const* unit
 }
 
 void ark_resolver_plan_destroy(ArkLinkContext* ctx, ArkResolverPlan* plan) {
+    (void)ctx;
     if (!plan) return;
 
     if (plan->symbols) {
