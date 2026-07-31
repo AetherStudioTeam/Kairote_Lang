@@ -77,6 +77,49 @@ bool accelerator_is_digit(char c) {
     return c >= '0' && c <= '9';
 }
 
+bool accelerator_is_octal_digit(char c) {
+    return c >= '0' && c <= '7';
+}
+
+bool accelerator_is_hex_digit(char c) {
+    return (c >= '0' && c <= '9') ||
+           (c >= 'a' && c <= 'f') ||
+           (c >= 'A' && c <= 'F');
+}
+
+int accelerator_hex_to_int(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+int encode_utf8(char* buffer, int codepoint, int max_length) {
+    if (codepoint < 0x80) {
+        if (max_length < 1) return 0;
+        buffer[0] = (char)codepoint;
+        return 1;
+    } else if (codepoint < 0x800) {
+        if (max_length < 2) return 0;
+        buffer[0] = (char)(0xC0 | (codepoint >> 6));
+        buffer[1] = (char)(0x80 | (codepoint & 0x3F));
+        return 2;
+    } else if (codepoint < 0x10000) {
+        if (max_length < 3) return 0;
+        buffer[0] = (char)(0xE0 | (codepoint >> 12));
+        buffer[1] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        buffer[2] = (char)(0x80 | (codepoint & 0x3F));
+        return 3;
+    } else {
+        if (max_length < 4) return 0;
+        buffer[0] = (char)(0xF0 | (codepoint >> 18));
+        buffer[1] = (char)(0x80 | ((codepoint >> 12) & 0x3F));
+        buffer[2] = (char)(0x80 | ((codepoint >> 6) & 0x3F));
+        buffer[3] = (char)(0x80 | (codepoint & 0x3F));
+        return 4;
+    }
+}
+
 bool accelerator_is_whitespace(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }

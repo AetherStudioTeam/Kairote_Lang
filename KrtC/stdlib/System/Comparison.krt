@@ -1,3 +1,0 @@
-namespace System
-
-public delegate int32 Comparison<T>(T x, T y)

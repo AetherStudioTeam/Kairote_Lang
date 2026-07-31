@@ -1,5 +1,6 @@
 #include "Vm.h"
 #include "Object.h"
+#include "../src/Runtime/Runtime.h"
 #include <stdio.h>
 #include <stdarg.h>
 

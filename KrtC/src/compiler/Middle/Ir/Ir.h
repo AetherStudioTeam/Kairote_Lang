@@ -1,7 +1,7 @@
 #ifndef KRT_IR_H
 #define KRT_IR_H
 #include "../../../Core/Utils/KrtCommon.h"
-#include "../../Frontend/FrontendTemp/FrontendTemp/parser/Ast.h"
+#include "../../Frontend/Parser/Ast.h"
 #include "IrMemory.h"
 #include "IrParamTable.h"
 
@@ -188,9 +188,11 @@ struct KrtIRBuilder {
     int layout_capacity;
     struct TypeCheckContext* type_context;
     KrtIRMemoryArena* arena;
-    
+
     int use_object_pool;
     int use_lazy_alloc;
+
+    void* extensions;
 };
 KrtIRBuilder* KrtIrBuilderCreate(void);
 void KrtIrBuilderDestroy(KrtIRBuilder* builder);
@@ -320,4 +322,4 @@ KRT_IR_INLINE KrtIRValue* KrtIrInstOperandsFast(KrtIRInst* inst) {
     return KRT_IR_LIKELY(inst != NULL) ? inst->operands : NULL;
 }
 
-#endif  
+#endif

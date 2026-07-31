@@ -1,0 +1,9 @@
+namespace TestHello
+{
+    using System.Console;
+
+    void main()
+    {
+        Console.WriteLine("Hello World")
+    }
+}

@@ -31,7 +31,7 @@ typedef struct ArkResolverReloc {
     uint32_t offset;
     uint32_t type;
     const ArkResolverSymbol* symbol;
-    int32_t addend;
+    int64_t addend;
     uint32_t target_rva;
     uint32_t symbol_rva;
 } ArkResolverReloc;

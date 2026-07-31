@@ -2,7 +2,7 @@
 #define KRT_IR_PARAM_TABLE_H
 
 #include "IrMemory.h"
-#include "../../Frontend/FrontendTemp/FrontendTemp/parser/Ast.h"
+#include "../../Frontend/Parser/Ast.h"
 
 typedef struct KrtIRParamNode {
     char* name;                 
@@ -30,4 +30,4 @@ int KrtIrParamTableCount(KrtIRParamTable* table);
 
 void KrtIrParamTableForeach(KrtIRParamTable* table, void (*callback)(KrtIRParamNode* node, void* userdata), void* userdata);
 
-#endif 
+#endif

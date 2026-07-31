@@ -233,7 +233,7 @@
     #define KRT_LINKER_CONSOLE_FLAG
     #define KRT_LINKER_ENTRY_FLAG "-e"
     #define KRT_LINKER_LIB_PATH_FLAG "-L"
-    #define KRT_LINKER_RUNTIME_LIBS "-lc -lm"
+    #define KRT_LINKER_RUNTIME_LIBS "-lc -lm -lpthread"
     #define KRT_LINKER_CMD "ld"
 #endif
 

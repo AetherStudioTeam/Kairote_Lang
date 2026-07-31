@@ -378,6 +378,12 @@ static void emit_call(Emitter* em, const char* func_name, KrtIRValue* args, int 
         actual_func_name = "_print_string";
     } else if (strcmp(func_name, "println_string") == 0) {
         actual_func_name = "_println_string";
+    } else if (strcmp(func_name, "Console__Write") == 0) {
+        actual_func_name = "Console__Write";
+    } else if (strcmp(func_name, "Console__WriteLine") == 0) {
+        actual_func_name = "Console__WriteLine";
+    } else if (strcmp(func_name, "Console__ReadLine") == 0) {
+        actual_func_name = "Console__ReadLine";
     }
     fprintf(em->output, "    call %s\n", actual_func_name);
     
@@ -856,5 +862,18 @@ void KrtX86Generate(FILE* output, KrtIRModule* module) {
         emit_function(output, func, module);
         func = func->next;
         func_count++;
+    }
+
+    /* Generate a main() wrapper if the entry point is not already named "main" */
+    if (module->main_function && strcmp(module->main_function->name, "main") != 0) {
+        fprintf(output, "\nglobal main\n");
+        fprintf(output, "; Wrapper: main -> %s\n", module->main_function->name);
+        fprintf(output, "main:\n");
+        fprintf(output, "    push rbp\n");
+        fprintf(output, "    mov rbp, rsp\n");
+        fprintf(output, "    call %s\n", module->main_function->name);
+        fprintf(output, "    mov rsp, rbp\n");
+        fprintf(output, "    pop rbp\n");
+        fprintf(output, "    ret\n");
     }
 }

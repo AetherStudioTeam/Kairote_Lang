@@ -2,15 +2,7 @@ namespace System
 
 public static class Math
 {
-    public static var PI: float64 = 3.14159265358979323846
-    public static var E: float64 = 2.71828182845904523536
-    public static var Tau: float64 = 6.28318530717958647692
-    public static var Epsilon: float64 = 2.22044604925031308085e-16
-    public static var PositiveInfinity: float64 = 1.0 / 0.0
-    public static var NegativeInfinity: float64 = -1.0 / 0.0
-    public static var NaN: float64 = 0.0 / 0.0
-
-    public static function Abs(value: int8): int8
+    public static function AbsInt(value: int32): int32
     {
         if value < 0
         {
@@ -19,676 +11,91 @@ public static class Math
         return value
     }
 
-    public static function Abs(value: int16): int16
+    public static function MaxInt(a: int32, b: int32): int32
     {
-        if value < 0
+        if a > b
         {
-            return -value
+            return a
         }
-        return value
+        return b
     }
 
-    public static function Abs(value: int32): int32
+    public static function MinInt(a: int32, b: int32): int32
     {
-        if value < 0
+        if a < b
         {
-            return -value
+            return a
         }
-        return value
+        return b
     }
 
-    public static function Abs(value: int64): int64
+    public static function Floor(value: float64): float64
     {
-        if value < 0
+        var i = int64(value)
+        if value >= 0.0
         {
-            return -value
+            return float64(i)
         }
-        return value
+        if float64(i) == value
+        {
+            return value
+        }
+        return float64(i - 1)
     }
 
-    public static function Abs(value: float32): float32
+    public static function Ceiling(value: float64): float64
+    {
+        var i = int64(value)
+        if value <= 0.0
+        {
+            return float64(i)
+        }
+        if float64(i) == value
+        {
+            return value
+        }
+        return float64(i + 1)
+    }
+
+    public static function Round(value: float64): float64
+    {
+        if value >= 0.0
+        {
+            return float64(int64(value + 0.5))
+        }
+        return float64(int64(value - 0.5))
+    }
+
+    public static function Sqrt(value: float64): float64
     {
         if value < 0.0
         {
-            return -value
+            return 0.0
         }
-        return value
-    }
-
-    public static function Abs(value: float64): float64
-    {
-        if value < 0.0
+        if value == 0.0
         {
-            return -value
+            return 0.0
         }
-        return value
-    }
-
-    public static function Acos(d: float64): float64
-    {
-        return unsafe_math_acos(d)
-    }
-
-    public static function Acosh(d: float64): float64
-    {
-        return unsafe_math_acosh(d)
-    }
-
-    public static function Asin(d: float64): float64
-    {
-        return unsafe_math_asin(d)
-    }
-
-    public static function Asinh(d: float64): float64
-    {
-        return unsafe_math_asinh(d)
-    }
-
-    public static function Atan(d: float64): float64
-    {
-        return unsafe_math_atan(d)
-    }
-
-    public static function Atan2(y: float64, x: float64): float64
-    {
-        return unsafe_math_atan2(y, x)
-    }
-
-    public static function Atanh(d: float64): float64
-    {
-        return unsafe_math_atanh(d)
-    }
-
-    public static function Cbrt(d: float64): float64
-    {
-        return unsafe_math_cbrt(d)
-    }
-
-    public static function Ceiling(a: float64): float64
-    {
-        return unsafe_math_ceil(a)
-    }
-
-    public static function Ceiling(a: float32): float32
-    {
-        return float32(unsafe_math_ceil(float64(a)))
-    }
-
-    public static function Cos(d: float64): float64
-    {
-        return unsafe_math_cos(d)
-    }
-
-    public static function Cosh(value: float64): float64
-    {
-        return unsafe_math_cosh(value)
-    }
-
-    public static function Exp(d: float64): float64
-    {
-        return unsafe_math_exp(d)
-    }
-
-    public static function Floor(d: float64): float64
-    {
-        return unsafe_math_floor(d)
-    }
-
-    public static function Floor(d: float32): float32
-    {
-        return float32(unsafe_math_floor(float64(d)))
-    }
-
-    public static function IEEERemainder(x: float64, y: float64): float64
-    {
-        return x - y * Math.Round(x / y)
-    }
-
-    public static function Log(d: float64): float64
-    {
-        return unsafe_math_log(d)
-    }
-
-    public static function Log(a: float64, newBase: float64): float64
-    {
-        return unsafe_math_log(a) / unsafe_math_log(newBase)
-    }
-
-    public static function Log10(d: float64): float64
-    {
-        return unsafe_math_log10(d)
-    }
-
-    public static function Log2(d: float64): float64
-    {
-        return unsafe_math_log2(d)
-    }
-
-    public static function Max(val1: int8, val2: int8): int8
-    {
-        if val1 > val2
+        var x = value
+        var prev = 0.0
+        while x != prev
         {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: int16, val2: int16): int16
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: int32, val2: int32): int32
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: int64, val2: int64): int64
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: uint8, val2: uint8): uint8
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: uint16, val2: uint16): uint16
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: uint32, val2: uint32): uint32
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: uint64, val2: uint64): uint64
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: float32, val2: float32): float32
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Max(val1: float64, val2: float64): float64
-    {
-        if val1 > val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: int8, val2: int8): int8
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: int16, val2: int16): int16
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: int32, val2: int32): int32
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: int64, val2: int64): int64
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: uint8, val2: uint8): uint8
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: uint16, val2: uint16): uint16
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: uint32, val2: uint32): uint32
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: uint64, val2: uint64): uint64
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: float32, val2: float32): float32
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Min(val1: float64, val2: float64): float64
-    {
-        if val1 < val2
-        {
-            return val1
-        }
-        return val2
-    }
-
-    public static function Pow(x: float64, y: float64): float64
-    {
-        return unsafe_math_pow(x, y)
-    }
-
-    public static function Round(a: float64): float64
-    {
-        return unsafe_math_round(a)
-    }
-
-    public static function Round(a: float64, digits: int32): float64
-    {
-        var power = Math.Pow(10.0, float64(digits))
-        return unsafe_math_round(a * power) / power
-    }
-
-    public static function Round(a: float64, mode: MidpointRounding): float64
-    {
-        if mode == MidpointRounding.AwayFromZero
-        {
-            if a >= 0.0
-            {
-                return unsafe_math_floor(a + 0.5)
-            }
-            else
-            {
-                return unsafe_math_ceil(a - 0.5)
-            }
-        }
-        return unsafe_math_round(a)
-    }
-
-    public static function Sign(value: int8): int32
-    {
-        if value < 0
-        {
-            return -1
-        }
-        if value > 0
-        {
-            return 1
-        }
-        return 0
-    }
-
-    public static function Sign(value: int16): int32
-    {
-        if value < 0
-        {
-            return -1
-        }
-        if value > 0
-        {
-            return 1
-        }
-        return 0
-    }
-
-    public static function Sign(value: int32): int32
-    {
-        if value < 0
-        {
-            return -1
-        }
-        if value > 0
-        {
-            return 1
-        }
-        return 0
-    }
-
-    public static function Sign(value: int64): int32
-    {
-        if value < 0
-        {
-            return -1
-        }
-        if value > 0
-        {
-            return 1
-        }
-        return 0
-    }
-
-    public static function Sign(value: float32): int32
-    {
-        if value < 0.0
-        {
-            return -1
-        }
-        if value > 0.0
-        {
-            return 1
-        }
-        return 0
-    }
-
-    public static function Sign(value: float64): int32
-    {
-        if value < 0.0
-        {
-            return -1
-        }
-        if value > 0.0
-        {
-            return 1
-        }
-        return 0
-    }
-
-    public static function Sin(a: float64): float64
-    {
-        return unsafe_math_sin(a)
-    }
-
-    public static function Sinh(value: float64): float64
-    {
-        return unsafe_math_sinh(value)
-    }
-
-    public static function Sqrt(d: float64): float64
-    {
-        return unsafe_math_sqrt(d)
-    }
-
-    public static function Sqrt(d: float32): float32
-    {
-        return float32(unsafe_math_sqrt(float64(d)))
-    }
-
-    public static function Tan(a: float64): float64
-    {
-        return unsafe_math_tan(a)
-    }
-
-    public static function Tanh(value: float64): float64
-    {
-        return unsafe_math_tanh(value)
-    }
-
-    public static function Truncate(d: float64): float64
-    {
-        return unsafe_math_trunc(d)
-    }
-
-    public static function Truncate(d: float32): float32
-    {
-        return float32(unsafe_math_trunc(float64(d)))
-    }
-
-    public static function Clamp(value: int8, min: int8, max: int8): int8
-    {
-        if value < min
-        {
-            return min
-        }
-        if value > max
-        {
-            return max
-        }
-        return value
-    }
-
-    public static function Clamp(value: int16, min: int16, max: int16): int16
-    {
-        if value < min
-        {
-            return min
-        }
-        if value > max
-        {
-            return max
-        }
-        return value
-    }
-
-    public static function Clamp(value: int32, min: int32, max: int32): int32
-    {
-        if value < min
-        {
-            return min
-        }
-        if value > max
-        {
-            return max
-        }
-        return value
-    }
-
-    public static function Clamp(value: int64, min: int64, max: int64): int64
-    {
-        if value < min
-        {
-            return min
-        }
-        if value > max
-        {
-            return max
-        }
-        return value
-    }
-
-    public static function Clamp(value: float32, min: float32, max: float32): float32
-    {
-        if value < min
-        {
-            return min
-        }
-        if value > max
-        {
-            return max
-        }
-        return value
-    }
-
-    public static function Clamp(value: float64, min: float64, max: float64): float64
-    {
-        if value < min
-        {
-            return min
-        }
-        if value > max
-        {
-            return max
-        }
-        return value
-    }
-
-    public static function CopySign(x: float64, y: float64): float64
-    {
-        if (x < 0.0 && y > 0.0) || (x > 0.0 && y < 0.0)
-        {
-            return -x
+            prev = x
+            x = (x + value / x) / 2.0
         }
         return x
     }
 
-    public static function DivRem(a: int32, b: int32, result: int32): int32
+    public static function ClampInt(value: int32, min: int32, max: int32): int32
     {
-        result = a % b
-        return a / b
-    }
-
-    public static function DivRem(a: int64, b: int64, result: int64): int64
-    {
-        result = a % b
-        return a / b
-    }
-
-    public static function FusedMultiplyAdd(x: float64, y: float64, z: float64): float64
-    {
-        return x * y + z
-    }
-
-    public static function IsFinite(d: float64): bool
-    {
-        return !Math.IsNaN(d) && !Math.IsInfinity(d)
-    }
-
-    public static function IsInfinity(d: float64): bool
-    {
-        return d == Math.PositiveInfinity || d == Math.NegativeInfinity
-    }
-
-    public static function IsNaN(d: float64): bool
-    {
-        return d != d
-    }
-
-    public static function IsNegative(d: float64): bool
-    {
-        return d < 0.0 || (d == 0.0 && 1.0 / d < 0.0)
-    }
-
-    public static function IsNegativeInfinity(d: float64): bool
-    {
-        return d == Math.NegativeInfinity
-    }
-
-    public static function IsNormal(d: float64): bool
-    {
-        return Math.IsFinite(d) && d != 0.0
-    }
-
-    public static function IsPositiveInfinity(d: float64): bool
-    {
-        return d == Math.PositiveInfinity
-    }
-
-    public static function IsSubnormal(d: float64): bool
-    {
-        return false
-    }
-
-    public static function MaxMagnitude(x: float64, y: float64): float64
-    {
-        var absX = Math.Abs(x)
-        var absY = Math.Abs(y)
-        if absX > absY
+        if value < min
         {
-            return x
+            return min
         }
-        if absX < absY
+        if value > max
         {
-            return y
+            return max
         }
-        return x
+        return value
     }
-
-    public static function MinMagnitude(x: float64, y: float64): float64
-    {
-        var absX = Math.Abs(x)
-        var absY = Math.Abs(y)
-        if absX < absY
-        {
-            return x
-        }
-        if absX > absY
-        {
-            return y
-        }
-        return x
-    }
-
-    public static function ReciprocalEstimate(d: float64): float64
-    {
-        return 1.0 / d
-    }
-
-    public static function ReciprocalSqrtEstimate(d: float64): float64
-    {
-        return 1.0 / Math.Sqrt(d)
-    }
-
-    public static function ScaleB(x: float64, n: int32): float64
-    {
-        return x * Math.Pow(2.0, float64(n))
-    }
-}
-
-public enum MidpointRounding
-{
-    ToEven = 0
-    AwayFromZero = 1
-    ToZero = 2
-    ToNegativeInfinity = 3
-    ToPositiveInfinity = 4
 }

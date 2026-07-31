@@ -1,8 +1,5 @@
 #include <string.h>
 
-extern void* memset(void* s, int c, size_t n);
-extern int strcmp(const char* s1, const char* s2);
-
 #include "ConfigManager.h"
 #include "../../Core/Utils/Logger.h"
 #include "../../Core/Utils/Path.h"
@@ -126,7 +123,7 @@ int KrtConfigValidate(KrtConfig* config) {
     if (!config) return 0;
     
     if (!config->create_project && !config->input_file) {
-        KrtError("未指定输入文件");
+        KrtError("Input file not specified");
         return 0;
     }
     
@@ -136,7 +133,7 @@ int KrtConfigValidate(KrtConfig* config) {
 int KrtConfigCreateProject(const char* project_name, const char* project_type) {
     KrtPlatform* platform = KrtPlatformGetCurrent();
     if (!platform) {
-        KrtError("无法创建平台抽象");
+        KrtError("Failed to create platform abstraction");
         return 1;
     }
 

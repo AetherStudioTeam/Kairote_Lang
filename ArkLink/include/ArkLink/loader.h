@@ -71,7 +71,7 @@ typedef struct ArkRelocationDesc {
     uint32_t sym_idx;
     uint32_t section_index;  
     uint16_t type;
-    int16_t addend;          
+    int64_t addend;          
 } ArkRelocationDesc;
 
 typedef struct ArkSymbolDesc {
@@ -144,6 +144,7 @@ int ark_link_section_add_reloc(ArkLinkSection* section, const ArkRelocationDesc*
 
 ArkLinkResult ark_link_load_kro(const char* path, ArkLinkUnit** unit);
 ArkLinkResult ark_link_load_coff(const char* path, ArkLinkUnit** unit);
+ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit);
 
 int ark_link_unit_add_reloc(ArkLinkUnit* unit, const ArkRelocationDesc* desc);
 

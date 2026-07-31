@@ -1,11 +1,8 @@
 #include "Allocator.h"
+#include "../Utils/KrtCommon.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-
-extern void *memset(void *s, int c, size_t n);
-extern void *memcpy(void *dest, const void *src, size_t n);
-extern size_t strlen(const char *s);
 
 #define MEMORY_MAGIC 0xDEADBEEF
 #define CANARY_VALUE 0xCAFEBABE
@@ -65,7 +62,7 @@ static void remove_memory_block(MemoryBlock* block) {
 void KrtMemorySafetyInit(void) {
     if (g_memory_safety) return;
     
-    g_memory_safety = malloc(sizeof(MemorySafetyManager));
+    g_memory_safety = KRT_MALLOC(sizeof(MemorySafetyManager));
     if (!g_memory_safety) {
         exit(1);
     }
@@ -79,7 +76,7 @@ void KrtMemorySafetyInit(void) {
     InitializeCriticalSection(&g_memory_safety->mutex);
 #else
     if (pthread_mutex_init(&g_memory_safety->mutex, NULL) != 0) {
-        free(g_memory_safety);
+        KRT_FREE(g_memory_safety);
         g_memory_safety = NULL;
         exit(1);
     }

@@ -108,10 +108,7 @@ LspDiagnosticList* lsp_analyze_document(const char* uri, const char* content) {
             if (sym_table) {
                 
                 int errors = symbol_table_get_error_count(sym_table);
-                if (errors > 0) {
-                    LSP_LOG_DEBUG("Symbol table has %d errors", errors);
-                }
-                
+                           
                 symbol_table_destroy(sym_table);
             }
             ast_destroy_node(ast);
@@ -120,8 +117,6 @@ LspDiagnosticList* lsp_analyze_document(const char* uri, const char* content) {
     }
     
     lexer_destroy(lexer);
-    
-    LSP_LOG_DEBUG("Analysis complete: %d diagnostics", list->count);
     
     return list;
 }

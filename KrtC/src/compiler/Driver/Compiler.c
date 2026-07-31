@@ -5,8 +5,8 @@
 #include "../Backend/Vm/VmCodegen.h"
 #include "../Backend/Kro/KroCodegen.h"
 #include "../../Core/Utils/KrtCommon.h"
-#include "../../../Shared/BytecodeGenerator.h"
-#include "../Frontend/FrontendTemp/FrontendTemp/semantic/TypeChecker.h"
+#include "BytecodeGenerator.h"
+#include "../Frontend/Semantic/TypeChecker.h"
 
 KrtCompiler* KrtCompilerCreate(const char* output_filename, KrtTargetPlatform target) {
     KrtCompiler* compiler = (KrtCompiler*)KRT_MALLOC(sizeof(KrtCompiler));

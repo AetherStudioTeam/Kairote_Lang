@@ -26,6 +26,15 @@ class Color:
     UNDERLINE = '\033[4m'
     GRAY = '\033[90m'
 
+    @classmethod
+    def auto_configure(cls):
+        if not sys.stdout.isatty():
+            cls.disable()
+            return
+        if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+            cls.disable()
+            return
+
     @staticmethod
     def disable():
         for attr in ['HEADER', 'OKBLUE', 'OKCYAN', 'OKGREEN', 'WARNING', 
@@ -151,10 +160,68 @@ class ProgressDisplay:
         self.skipped_tasks = 0
         self.workers: List[Optional[str]] = [None] * max_workers
         self.lock = threading.Lock()
-        self.running = False
-        self.last_render_lines = 0
+        self._is_tty = sys.stdout.isatty()
+        self._mode = self._detect_mode()
+        self._running = False
+        self._last_render_lines = 0
         self._last_render_time = 0
-        self.render_interval = 0.05
+        self._render_interval = 0.05
+        self._last_single_len = 0
+    def _detect_mode(self) -> str:
+        if not self._is_tty:
+            return "dumb"
+        if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
+            return "dumb"
+
+        # Windows 特殊处理
+        if sys.platform == "win32":
+            try:
+                import ctypes
+
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.GetStdHandle(-11)
+                mode = ctypes.c_ulong()
+                if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+                    if mode.value & 0x0004:
+                        modern = (
+                            "WT_SESSION",
+                            "VSCODE_CWD",
+                            "TERMINUS_SUBLIME",
+                            "ConEmuDir",
+                            "TERMINAL_EMULATOR",
+                        )
+                        if any(k in os.environ for k in modern):
+                            return "ansi"
+                        return "cr"
+                    else:
+                        kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+            except Exception:
+                pass
+            return "dumb"
+
+        term = os.environ.get("TERM", "")
+        if not term:
+            return "dumb"
+
+        good_terms = (
+            "xterm",
+            "screen",
+            "tmux",
+            "rxvt",
+            "alacritty",
+            "kitty",
+            "konsole",
+            "gnome",
+            "vte",
+        )
+        if any(t in term for t in good_terms):
+            return "ansi"
+
+        return "cr"
+
+    @staticmethod
+    def _strip_ansi(text: str) -> str:
+        return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
     def update_worker(self, worker_id: int, status: Optional[str]):
         with self.lock:
@@ -167,87 +234,188 @@ class ProgressDisplay:
             self.total_tasks = total
             self.skipped_tasks = skipped
 
-    def _clear_screen(self):
-        if sys.platform == 'win32':
-            os.system('cls')
-        else:
-            os.system('clear')
-
-    def _move_cursor_up(self, n: int):
-        if n > 0:
-            sys.stdout.write(f'\033[{n}A')
-
-    def _clear_line(self):
-        sys.stdout.write('\033[2K\r')
-
     def render(self, force: bool = False):
         with self.lock:
             now = time.time()
-            if not force and now - self._last_render_time < self.render_interval:
+            if not force and now - self._last_render_time < self._render_interval:
                 return
             self._last_render_time = now
 
             if self.total_tasks == 0:
                 return
 
-            percentage = (self.completed_tasks / self.total_tasks * 100)
-
-            lines = []
-
-            status_text = f"Building [{self.completed_tasks}/{self.total_tasks}] {percentage:.1f}%"
-            lines.append(f"{Color.BOLD}{Color.OKBLUE}{status_text}{Color.ENDC}")
-
-            if self.show_progress_bar:
-                bar_width = 40
-                filled = int(bar_width * self.completed_tasks / self.total_tasks)
-                filled = min(filled, bar_width)
-                bar = '█' * filled + '░' * (bar_width - filled)
-                lines.append(f"{Color.OKCYAN}{bar}{Color.ENDC}")
-
-            if self.skipped_tasks > 0:
-                lines.append(f"{Color.GRAY}({self.skipped_tasks} up-to-date){Color.ENDC}")
+            if self._mode == "dumb":
+                self._render_dumb()
+            elif self._mode == "cr":
+                self._render_cr()
             else:
-                lines.append("")
-
-            active_workers = [w for w in self.workers if w is not None]
-            if active_workers:
-                lines.append(f"{Color.BOLD}Active tasks:{Color.ENDC}")
-                for w in active_workers[:self.max_workers]:
-                    lines.append(f"  {w}")
-            else:
-                lines.append(f"{Color.GRAY}Waiting...{Color.ENDC}")
-
-            if self.running and self.last_render_lines > 0:
-                self._move_cursor_up(self.last_render_lines)
-
-            for line in lines:
-                self._clear_line()
-                print(line)
-
-            self.last_render_lines = len(lines)
-            self.running = True
-            sys.stdout.flush()
+                self._render_ansi()
 
     def finalize(self, success: bool):
         with self.lock:
-            if self.running and self.last_render_lines > 0:
-                self._move_cursor_up(self.last_render_lines)
+            if self._mode == "dumb":
+                status = "BUILD SUCCESSFUL" if success else "BUILD FAILED"
+                print(f"\n[{self.completed_tasks}/{self.total_tasks}] {status}")
+                return
 
-            status = f"{Color.OKGREEN}BUILD SUCCESSFUL{Color.ENDC}" if success else f"{Color.FAIL}BUILD FAILED{Color.ENDC}"
-            self._clear_line()
-            print(f"{Color.BOLD}{status} [{self.total_tasks}/{self.total_tasks}]{Color.ENDC}")
+            if self._mode == "cr":
+                self._finalize_cr(success)
+                return
 
-            if self.skipped_tasks > 0:
-                self._clear_line()
-                print(f"{Color.GRAY}({self.skipped_tasks} up-to-date){Color.ENDC}")
+            self._finalize_ansi(success)
+    def _render_dumb(self):
+        milestones = {
+            0,
+            self.total_tasks // 4,
+            self.total_tasks // 2,
+            3 * self.total_tasks // 4,
+            self.total_tasks,
+            }
+        if self.completed_tasks in milestones:
+            print(
+                f"[{self.completed_tasks}/{self.total_tasks}] Building... "
+                f"({self.skipped_tasks} cached)"
+            )
 
-            for _ in range(self.max_workers + 1):
-                self._clear_line()
-                print()
+    def _render_cr(self):
+        line = self._build_single_line()
+        visible = self._strip_ansi(line)
+        pad = max(0, self._last_single_len - len(visible))
 
-            sys.stdout.flush()
-            self.running = False
+        sys.stdout.write(f"\r{line}{' ' * pad}")
+        sys.stdout.flush()
+        self._last_single_len = len(visible)
+        self._running = True
 
+    def _finalize_cr(self, success: bool):
+        status = (
+            f"{Color.OKGREEN}BUILD SUCCESSFUL{Color.ENDC}"
+            if success
+            else f"{Color.FAIL}BUILD FAILED{Color.ENDC}"
+        )
+        line = f"{Color.BOLD}{status} [{self.completed_tasks}/{self.total_tasks}]{Color.ENDC}"
+        visible = self._strip_ansi(line)
+        pad = max(0, self._last_single_len - len(visible))
+
+        sys.stdout.write(f"\r{line}{' ' * pad}\n")
+        sys.stdout.flush()
+        self._last_single_len = 0
+        self._running = False
+
+    def _build_single_line(self) -> str:
+        pct = self.completed_tasks / self.total_tasks * 100
+        parts = []
+
+        if self.show_progress_bar:
+            w = 20
+            filled = int(w * self.completed_tasks / self.total_tasks)
+            bar = "█" * filled + "░" * (w - filled)
+            parts.append(f"{Color.OKCYAN}{bar}{Color.ENDC}")
+
+        parts.append(
+            f"{Color.BOLD}{Color.OKBLUE}[{self.completed_tasks}/{self.total_tasks}]{Color.ENDC}"
+        )
+
+        active = [w for w in self.workers if w is not None]
+        if active:
+            # 从 worker 状态字符串中提取纯任务名
+            raw = self._strip_ansi(active[0])
+            name = raw.split("] ", 1)[-1] if "] " in raw else raw
+            if len(name) > 22:
+                name = name[:19] + "..."
+            parts.append(f"{Color.GRAY}{name}{Color.ENDC}")
+
+        if self.skipped_tasks:
+            parts.append(f"{Color.GRAY}(+{self.skipped_tasks} cached){Color.ENDC}")
+
+        return " ".join(parts)
+
+    def _render_ansi(self):
+        lines = self._build_lines()
+        if not lines:
+            return
+
+        if self._running and self._last_render_lines > 0:
+            if self._last_render_lines > 1:
+                sys.stdout.write(f"\033[{self._last_render_lines - 1}A")
+            sys.stdout.write("\r")
+
+        for i, line in enumerate(lines):
+            if i > 0:
+                sys.stdout.write("\n")
+            sys.stdout.write("\033[2K")
+            sys.stdout.write(line)
+
+        for _ in range(len(lines), self._last_render_lines):
+            sys.stdout.write("\n")
+            sys.stdout.write("\033[2K")
+
+        sys.stdout.flush()
+        self._last_render_lines = len(lines)
+        self._running = True
+
+    def _finalize_ansi(self, success: bool):
+        final_lines = []
+        status = (
+            f"{Color.OKGREEN}BUILD SUCCESSFUL{Color.ENDC}"
+            if success
+            else f"{Color.FAIL}BUILD FAILED{Color.ENDC}"
+        )
+        final_lines.append(
+            f"{Color.BOLD}{status} [{self.total_tasks}/{self.total_tasks}]{Color.ENDC}"
+        )
+        if self.skipped_tasks > 0:
+            final_lines.append(f"{Color.GRAY}({self.skipped_tasks} up-to-date){Color.ENDC}")
+
+        if self._running and self._last_render_lines > 0:
+            if self._last_render_lines > 1:
+                sys.stdout.write(f"\033[{self._last_render_lines - 1}A")
+            sys.stdout.write("\r")
+
+        for i, line in enumerate(final_lines):
+            if i > 0:
+                sys.stdout.write("\n")
+            sys.stdout.write("\033[2K")
+            sys.stdout.write(line)
+
+        for _ in range(len(final_lines), self._last_render_lines):
+            sys.stdout.write("\n")
+            sys.stdout.write("\033[2K")
+
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        self._running = False
+        self._last_render_lines = 0
+
+    def _build_lines(self) -> List[str]:
+        lines = []
+        pct = self.completed_tasks / self.total_tasks * 100
+        lines.append(
+            f"{Color.BOLD}{Color.OKBLUE}Building [{self.completed_tasks}/{self.total_tasks}] {pct:.1f}%{Color.ENDC}"
+        )
+
+        if self.show_progress_bar:
+            w = 40
+            filled = int(w * self.completed_tasks / self.total_tasks)
+            filled = min(filled, w)
+            bar = "█" * filled + "░" * (w - filled)
+            lines.append(f"{Color.OKCYAN}{bar}{Color.ENDC}")
+
+        lines.append(
+            f"{Color.GRAY}({self.skipped_tasks} up-to-date){Color.ENDC}"
+            if self.skipped_tasks
+            else ""
+        )
+
+        active = [w for w in self.workers if w is not None]
+        if active:
+            lines.append(f"{Color.BOLD}Active tasks:{Color.ENDC}")
+            for w in active[: self.max_workers]:
+                lines.append(f"  {w}")
+        else:
+            lines.append(f"{Color.GRAY}Waiting...{Color.ENDC}")
+
+        return lines
 class SourceScanner:
     def __init__(self, config: BuildConfig, build_vm: bool = False):
         self.config = config

@@ -4,10 +4,6 @@
 #include <string.h>
 #include <ctype.h>
 
-extern int strcmp(const char *s1, const char *s2);
-extern size_t strlen(const char *s);
-extern int strncmp(const char *s1, const char *s2, size_t n);
-
 Preprocessor* PreprocessorCreate(void) {
     Preprocessor* preprocessor = (Preprocessor*)KRT_MALLOC(sizeof(Preprocessor));
     if (!preprocessor) return NULL;

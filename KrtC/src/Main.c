@@ -1,8 +1,4 @@
 #include <string.h>
-extern char* strcpy(char* dest, const char* src);
-extern char* strncpy(char* dest, const char* src, size_t n);
-extern char* strrchr(const char* str, int c);
-extern int strcmp(const char* s1, const char* s2);
 #ifdef _WIN32
 #include <windows.h>
 #include <io.h>
@@ -42,13 +38,13 @@ typedef struct TypeCheckContext TypeCheckContext;
 TypeCheckContext* type_check_context_create(void* semantic_analyzer);
 void type_check_context_destroy(TypeCheckContext* context);
 int type_check_program(TypeCheckContext* context, ASTNode* ast);
-#include "compiler/Frontend/FrontendTemp/FrontendTemp/parser/Parser.h"
-#include "compiler/Frontend/FrontendTemp/FrontendTemp/lexer/Tokenizer.h"
+#include "compiler/Frontend/Parser/Parser.h"
+#include "compiler/Frontend/Lexer/Tokenizer.h"
 #include "compiler/Driver/Project.h"
 #include "compiler/Driver/ParallelCompiler.h"
-#include "compiler/Frontend/FrontendTemp/FrontendTemp/semantic/SemanticAnalyzer.h"
+#include "compiler/Frontend/Semantic/SemanticAnalyzer.h"
 #include "compiler/Driver/Preprocessor.h"
-#include "compiler/Frontend/FrontendTemp/FrontendTemp/semantic/Generics.h"
+#include "compiler/Frontend/Semantic/Generics.h"
 #include "compiler/Driver/ArkLinkIntegration.h"
 extern void KrtOutputCacheInit(void);
 extern void KrtOutputCacheCleanup(void);
@@ -332,7 +328,7 @@ static int KrtLinkKroExecutable(KrtConfig* config, KrtPlatform* platform,
 
 static int KrtCompileSingleFile(const char* input_file, const char* output_file, KrtCommandTargetType target_type, int show_ir, int keep_temp) {
     if (!input_file) {
-        KrtError("输入文件为空");
+        KrtError("Input file is empty");
         return 1;
     }
     
@@ -342,13 +338,13 @@ static int KrtCompileSingleFile(const char* input_file, const char* output_file,
             strcpy(default_output, "output.exe");
             output_file = default_output;
         } else {
-            KrtError("输出文件为空");
+            KrtError("Output file is empty");
             return 1;
         }
     }
     KrtConfig* config = KrtConfigCreate();
     if (!config) {
-        KrtError("无法创建配置管理器");
+        KrtError("Failed to create config manager");
         return 1;
     }
     config->keep_temp_files = keep_temp;
@@ -403,14 +399,14 @@ static int KrtCompileSingleFile(const char* input_file, const char* output_file,
     
     KrtPlatform* platform = KrtPlatformGetCurrent();
     if (!platform) {
-        KrtError("无法创建平台抽象");
+        KrtError("Failed to create platform abstraction");
         KrtConfigDestroy(config);
         return 1;
     }
     
     KrtCompilePipeline* pipeline = KrtCompilePipelineCreate(config, platform);
     if (!pipeline) {
-        KrtError("无法创建编译管道");
+        KrtError("Failed to create compile pipeline");
         KrtConfigDestroy(config);
         KrtPlatformDestroy(platform);
         return 1;
@@ -476,7 +472,7 @@ static int KrtCompileSingleFile(const char* input_file, const char* output_file,
                 }
                 KrtBuildContextDestroy(build_ctx);
             } else {
-                KrtError("无法创建构建上下文");
+                KrtError("Failed to create build context");
                 result = 0;
             }
 #endif
@@ -1250,7 +1246,7 @@ static int KrtBuildProject(const char* project_file, const char* output_path __a
     
     KrtPlatform* platform = KrtPlatformGetCurrent();
     if (!platform) {
-        KrtError("无法创建平台抽象");
+        KrtError("Failed to create platform abstraction");
         return 1;
     }
     
