@@ -1,0 +1,9 @@
+namespace TestMinimal
+{
+    using System.Console;
+
+    void main()
+    {
+        Console.WriteLineString("Hello World")
+    }
+}

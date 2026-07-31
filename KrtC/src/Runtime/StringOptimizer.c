@@ -5,6 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Forward declarations for runtime functions used by StringOptimizer */
+extern void* KrtMalloc(size_t size);
+extern void KrtFree(void* ptr);
+extern char* KrtStrdup(const char* src);
+
 typedef struct StringConstant {
     char* str;
     size_t len;
@@ -59,13 +64,13 @@ static StringConstant* add_string_to_pool(const char* str) {
     size_t hash = string_hash(str);
     size_t index = hash % STRING_POOL_SIZE;
     
-    StringConstant* new_const = malloc(sizeof(StringConstant));
+    StringConstant* new_const = KrtMalloc(sizeof(StringConstant));
     if (!new_const) return NULL;
     
     size_t len = strlen(str);
-    new_const->str = malloc(len + 1);
+    new_const->str = KrtMalloc(len + 1);
     if (!new_const->str) {
-        free(new_const);
+        KrtFree(new_const);
         return NULL;
     }
     
@@ -81,14 +86,14 @@ static StringConstant* add_string_to_pool(const char* str) {
 
 char* KrtStrcatOptimized(const char* str1, const char* str2) {
     if (!str1 && !str2) return NULL;
-    if (!str1) return strdup(str2);
-    if (!str2) return strdup(str1);
+    if (!str1) return KrtStrdup(str2);
+    if (!str2) return KrtStrdup(str1);
     
     size_t len1 = strlen(str1);
     size_t len2 = strlen(str2);
     size_t total_len = len1 + len2 + 1;
     
-    char* result = malloc(total_len);
+    char* result = KrtMalloc(total_len);
     if (!result) return NULL;
     
     memcpy(result, str1, len1);
@@ -107,7 +112,7 @@ char* KrtStrcatMultiple(const char** parts, int count) {
         }
     }
     
-    char* result = malloc(total_len);
+    char* result = KrtMalloc(total_len);
     if (!result) return NULL;
     
     char* current = result;
@@ -137,7 +142,7 @@ const char* KrtGetStringConstant(const char* str) {
 
 char* KrtIntToStringOptimized(int num) {
     
-    char* buffer = malloc(12); 
+    char* buffer = KrtMalloc(12); 
     if (!buffer) return NULL;
     
     int i = 10; 
@@ -178,13 +183,13 @@ char* KrtIntToStringOptimized(int num) {
 
 char* KrtDoubleToStringOptimized(double num) {
     
-    char* buffer = malloc(32);
+    char* buffer = KrtMalloc(32);
     if (!buffer) return NULL;
     
     int len = snprintf(buffer, 32, "%.6g", num);
     
     if (len < 0 || len >= 32) {
-        free(buffer);
+        KrtFree(buffer);
         return NULL;
     }
     
@@ -227,7 +232,7 @@ static StringPool* string_memory_pool = NULL;
 char* KrtPoolAllocString(size_t size) {
     if (size > STRING_POOL_CHUNK_SIZE / 4) {
         
-        return malloc(size);
+        return KrtMalloc(size);
     }
     
     StringPool* pool = string_memory_pool;
@@ -240,12 +245,12 @@ char* KrtPoolAllocString(size_t size) {
         pool = pool->next;
     }
     
-    pool = malloc(sizeof(StringPool));
+    pool = KrtMalloc(sizeof(StringPool));
     if (!pool) return NULL;
     
-    pool->buffer = malloc(STRING_POOL_CHUNK_SIZE);
+    pool->buffer = KrtMalloc(STRING_POOL_CHUNK_SIZE);
     if (!pool->buffer) {
-        free(pool);
+        KrtFree(pool);
         return NULL;
     }
     

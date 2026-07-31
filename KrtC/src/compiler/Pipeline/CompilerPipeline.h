@@ -4,9 +4,9 @@
 #include "../../Core/Utils/KrtCommon.h"
 #include "../Driver/ConfigManager.h"
 #include "../Platform/PlatformAbstraction.h"
-#include "../Frontend/FrontendTemp/FrontendTemp/lexer/Tokenizer.h"
-#include "../Frontend/FrontendTemp/FrontendTemp/parser/Parser.h"
-#include "../Frontend/FrontendTemp/FrontendTemp/semantic/SemanticAnalyzer.h"
+#include "../Frontend/Lexer/Tokenizer.h"
+#include "../Frontend/Parser/Parser.h"
+#include "../Frontend/Semantic/SemanticAnalyzer.h"
 #include "../Driver/Preprocessor.h"
 #include "../Driver/Compiler.h"
 
@@ -80,4 +80,4 @@ const char* KrtCompilePipelineGetError(KrtCompilePipeline* pipeline);
 KrtCompileStageResult* KrtCompilePipelineGetStageResults(KrtCompilePipeline* pipeline, int* count);
 double KrtCompilePipelineGetTotalDuration(KrtCompilePipeline* pipeline);
 
-#endif 
+#endif

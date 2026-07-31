@@ -18,28 +18,28 @@ typedef struct X86PeepholeOptimizer {
 } X86PeepholeOptimizer;
 
 X86PeepholeOptimizer* x86_peephole_optimizer_create(void) {
-    X86PeepholeOptimizer* optimizer = (X86PeepholeOptimizer*)calloc(1, sizeof(X86PeepholeOptimizer));
+    X86PeepholeOptimizer* optimizer = (X86PeepholeOptimizer*)KRT_CALLOC(1, sizeof(X86PeepholeOptimizer));
     if (!optimizer) return NULL;
-    
+
     optimizer->pattern_capacity = 32;
-    optimizer->patterns = (PeepholePattern*)calloc(optimizer->pattern_capacity, sizeof(PeepholePattern));
+    optimizer->patterns = (PeepholePattern*)KRT_CALLOC(optimizer->pattern_capacity, sizeof(PeepholePattern));
     if (!optimizer->patterns) {
-        free(optimizer);
+        KRT_FREE(optimizer);
         return NULL;
     }
-    
+
     return optimizer;
 }
 
 void x86_peephole_optimizer_destroy(X86PeepholeOptimizer* optimizer) {
     if (!optimizer) return;
-    
+
     for (int i = 0; i < optimizer->pattern_count; i++) {
-        free(optimizer->patterns[i].pattern);
-        free(optimizer->patterns[i].replacement);
+        KRT_FREE(optimizer->patterns[i].pattern);
+        KRT_FREE(optimizer->patterns[i].replacement);
     }
-    free(optimizer->patterns);
-    free(optimizer);
+    KRT_FREE(optimizer->patterns);
+    KRT_FREE(optimizer);
 }
 
 typedef struct {

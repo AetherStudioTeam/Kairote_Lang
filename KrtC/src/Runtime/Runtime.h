@@ -163,7 +163,7 @@ KRT_RUNTIME_EXPORT int KRT_API KrtRemove(const char* filename);
 KRT_RUNTIME_EXPORT int KRT_API KrtRename(const char* oldname, const char* newname);
 KRT_RUNTIME_EXPORT const char* KRT_API KrtStrerror(KrtErrorCode code);
 KRT_RUNTIME_EXPORT KrtArray* KRT_API array_create(size_t element_size, size_t initial_capacity);
-KRT_RUNTIME_EXPORT void KRT_API array_KRT_FREE(KrtArray* array);
+KRT_RUNTIME_EXPORT void KRT_API array_free(KrtArray* array);
 KRT_RUNTIME_EXPORT size_t KRT_API array_size(KrtArray* array);
 KRT_RUNTIME_EXPORT size_t KRT_API array_capacity(KrtArray* array);
 KRT_RUNTIME_EXPORT int KRT_API array_resize(KrtArray* array, size_t new_capacity);
@@ -171,7 +171,7 @@ KRT_RUNTIME_EXPORT int KRT_API array_append(KrtArray* array, const void* element
 KRT_RUNTIME_EXPORT void* KRT_API array_get(KrtArray* array, size_t index);
 KRT_RUNTIME_EXPORT int KRT_API array_set(KrtArray* array, size_t index, const void* element);
 KRT_RUNTIME_EXPORT KrtHashMap* KRT_API hashmap_create(size_t initial_capacity);
-KRT_RUNTIME_EXPORT void KRT_API hashmap_KRT_FREE(KrtHashMap* map);
+KRT_RUNTIME_EXPORT void KRT_API hashmap_free(KrtHashMap* map);
 KRT_RUNTIME_EXPORT int KRT_API hashmap_put(KrtHashMap* map, const void* key, KrtHashMapType key_type, const void* value, KrtHashMapType value_type);
 KRT_RUNTIME_EXPORT int KRT_API hashmap_get(KrtHashMap* map, const void* key, KrtHashMapType key_type, void** value, KrtHashMapType* out_value_type);
 KRT_RUNTIME_EXPORT int KRT_API hashmap_remove(KrtHashMap* map, const void* key, KrtHashMapType key_type);
@@ -199,7 +199,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtDrawRect(KrtWindow window, KrtRect rect, KrtC
 KRT_RUNTIME_EXPORT void KRT_API KrtDrawCircle(KrtWindow window, KrtPoint center, int radius, KrtColor color);
 KRT_RUNTIME_EXPORT void KRT_API KrtDrawText(KrtWindow window, const char* text, KrtPoint position, KrtColor color);
 KRT_RUNTIME_EXPORT void KRT_API KrtExit(int code);
-
 KRT_RUNTIME_EXPORT int KRT_API KrtIsInstance(void* obj, const char* typeName);
 KRT_RUNTIME_EXPORT void* KRT_API KrtAsInstance(void* obj, const char* typeName);
 KRT_RUNTIME_EXPORT void* KRT_API KrtNullCoalesce(void* left, void* right);
@@ -211,31 +210,23 @@ KRT_RUNTIME_EXPORT void KRT_API KrtRethrowException(void);
 KRT_RUNTIME_EXPORT void* KRT_API KrtGetCurrentException(void);
 KRT_RUNTIME_EXPORT void KRT_API KrtSetCurrentException(void* exception);
 KRT_RUNTIME_EXPORT void KRT_API Dispose(void* obj);
-
-// Type casting functions
 KRT_RUNTIME_EXPORT int KRT_API KrtCastToInt32(double value);
 KRT_RUNTIME_EXPORT long long KRT_API KrtCastToInt64(double value);
 KRT_RUNTIME_EXPORT float KRT_API KrtCastToFloat32(double value);
 KRT_RUNTIME_EXPORT double KRT_API KrtCastToFloat64(double value);
 KRT_RUNTIME_EXPORT int KRT_API KrtCastToBool(double value);
 KRT_RUNTIME_EXPORT char* KRT_API KrtCastToString(double value);
-
-// LINQ OrderBy support
 typedef int (KRT_API *KrtCompareFunc)(const void*, const void*);
 KRT_RUNTIME_EXPORT void KRT_API KrtOrderBy(void* array, int count, size_t element_size, KrtCompareFunc compare);
 KRT_RUNTIME_EXPORT int KRT_API KrtCompareInt32Asc(const void* a, const void* b);
 KRT_RUNTIME_EXPORT int KRT_API KrtCompareInt32Desc(const void* a, const void* b);
 KRT_RUNTIME_EXPORT int KRT_API KrtCompareFloat64Asc(const void* a, const void* b);
 KRT_RUNTIME_EXPORT int KRT_API KrtCompareFloat64Desc(const void* a, const void* b);
-
-// sizeof support
 KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfInt32(void);
 KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfInt64(void);
 KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfFloat32(void);
 KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfFloat64(void);
 KRT_RUNTIME_EXPORT int KRT_API KrtSizeOfPointer(void);
-
-// String interpolation support
 KRT_RUNTIME_EXPORT char* KRT_API KrtStringConcat(const char* s1, const char* s2);
 KRT_RUNTIME_EXPORT char* KRT_API KrtInt32ToString(int32_t value);
 KRT_RUNTIME_EXPORT char* KRT_API KrtInt64ToString(int64_t value);
@@ -243,47 +234,33 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtFloat32ToString(float value);
 KRT_RUNTIME_EXPORT char* KRT_API KrtFloat64ToString(double value);
 KRT_RUNTIME_EXPORT char* KRT_API KrtBoolToString(int value);
 KRT_RUNTIME_EXPORT char* KRT_API KrtPointerToString(void* value);
-
-// Tuple support
 KRT_RUNTIME_EXPORT void* KRT_API KrtCreateTuple(int element_count);
 KRT_RUNTIME_EXPORT void KRT_API KrtTupleSetElement(void* tuple, int index, void* value);
 KRT_RUNTIME_EXPORT void* KRT_API KrtTupleGetElement(void* tuple, int index);
-
-// Pointer and Memory Operations
 KRT_RUNTIME_EXPORT void* KRT_API KrtGetVariableAddress(const char* var_name);
 KRT_RUNTIME_EXPORT void* KRT_API KrtLoadPtr(void* base, int offset);
 KRT_RUNTIME_EXPORT void KRT_API KrtStorePtr(void* base, int offset, void* value);
 KRT_RUNTIME_EXPORT void* KRT_API KrtStackAlloc(int size);
 KRT_RUNTIME_EXPORT void KRT_API KrtPinObject(void* obj);
 KRT_RUNTIME_EXPORT void KRT_API KrtUnpinObject(void* obj);
-
-// Async/Await Support
 KRT_RUNTIME_EXPORT void* KRT_API KrtCreateTask(void);
 KRT_RUNTIME_EXPORT void KRT_API KrtCompleteTask(void* task_handle, void* result);
 KRT_RUNTIME_EXPORT void* KRT_API KrtAwaitTask(void* task_handle);
 KRT_RUNTIME_EXPORT int KRT_API KrtTaskIsCompleted(void* task_handle);
-
-// LINQ Support Functions
 KRT_RUNTIME_EXPORT void* KRT_API KrtLinqWhere(void* source, void* predicate);
 KRT_RUNTIME_EXPORT void* KRT_API KrtLinqOrderBy(void* source, int ascending, void* key_selector);
 KRT_RUNTIME_EXPORT void* KRT_API KrtLinqGroupBy(void* source, void* key, void* element, const char* into_var);
 KRT_RUNTIME_EXPORT void* KRT_API KrtLinqSelect(void* source, void* selector);
-
-// Delegate Support
 KRT_RUNTIME_EXPORT void* KRT_API KrtCreateDelegate(void* target, void* method_ptr, const char* method_name);
 KRT_RUNTIME_EXPORT void* KRT_API KrtInvokeDelegate(void* delegate_handle, void** args, int arg_count);
 KRT_RUNTIME_EXPORT void KRT_API KrtFreeDelegate(void* delegate_handle);
-
-// Generic Static Field Support
 KRT_RUNTIME_EXPORT void* KRT_API KrtGetGenericStaticField(const char* mangled_name);
 KRT_RUNTIME_EXPORT void KRT_API KrtSetGenericStaticField(const char* mangled_name, void* value);
 KRT_RUNTIME_EXPORT void KRT_API KrtClearGenericStaticFields(void);
-
-// Generic Constraint Support
 KRT_RUNTIME_EXPORT int KRT_API KrtIsClass(void* obj);
 KRT_RUNTIME_EXPORT int KRT_API KrtIsStruct(void* obj);
 KRT_RUNTIME_EXPORT int KRT_API KrtImplementsInterface(void* obj, const char* interface_name);
 KRT_RUNTIME_EXPORT int KRT_API KrtInheritsFrom(void* obj, const char* base_class_name);
 KRT_RUNTIME_EXPORT int KRT_API KrtCheckGenericConstraint(void* obj, const char* constraint_type);
 
-#endif 
+#endif

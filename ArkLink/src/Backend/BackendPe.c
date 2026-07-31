@@ -647,28 +647,24 @@ static uint8_t* generate_export_table(ArkBackendInput* input, uint32_t edata_rva
     const char* dll_name = input->export_name ? input->export_name : "exported.dll";
     size_t dll_name_len = strlen(dll_name) + 1;
 
-    // 1. 统一预留所有空间（仅记录偏移，不取指针）
     size_t edt_offset      = export_builder_append(builder, NULL, edt_size);
     size_t eat_offset      = export_builder_append(builder, NULL, eat_size);
     size_t ent_offset      = export_builder_append(builder, NULL, ent_size);
     size_t eot_offset      = export_builder_append(builder, NULL, eot_size);
     size_t dll_name_offset = export_builder_append(builder, dll_name, dll_name_len);
 
-    // 2. 统一错误检查
     if (edt_offset == (size_t)-1 || eat_offset == (size_t)-1 ||
         ent_offset == (size_t)-1 || eot_offset == (size_t)-1 ||
         dll_name_offset == (size_t)-1) {
         goto fail;
     }
 
-    // 3. 先遍历一次，算出每个 name 的长度（不 append）
     size_t* name_lens = (size_t*)malloc(count * sizeof(size_t));
     if (!name_lens) goto fail;
     for (size_t i = 0; i < count; i++) {
         name_lens[i] = strlen(sorted_exports[i].name) + 1;
     }
 
-    // 4. 再预分配所有 name slot（仍然不写内容，只占位）
     size_t* name_offsets = (size_t*)malloc(count * sizeof(size_t));
     if (!name_offsets) {
         free(name_lens);
@@ -683,12 +679,10 @@ static uint8_t* generate_export_table(ArkBackendInput* input, uint32_t edata_rva
         }
     }
 
-    // 5. 所有 append 已结束，此时 builder->data 不会再移动，安全取绝对指针
     uint32_t* eat = (uint32_t*)(builder->data + eat_offset);
     uint32_t* ent = (uint32_t*)(builder->data + ent_offset);
     uint16_t* eot = (uint16_t*)(builder->data + eot_offset);
 
-    // 6. 填数据（不再调 append，eat/ent/eot/edt 全部稳定）
     for (size_t i = 0; i < count; i++) {
         ArkExportEntry* exp = &sorted_exports[i];
         memcpy(builder->data + name_offsets[i], exp->name, name_lens[i]);
@@ -707,7 +701,6 @@ static uint8_t* generate_export_table(ArkBackendInput* input, uint32_t edata_rva
     free(name_lens);
     free(name_offsets);
 
-    // 7. 填充 EDT
     PE_EXPORT_DIRECTORY_ENTRY* edt = (PE_EXPORT_DIRECTORY_ENTRY*)(builder->data + edt_offset);
     edt->ExportFlags = 0;
     edt->TimeDateStamp = 0;
@@ -1122,10 +1115,6 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
             }
 
             uint64_t symbol_addr;
-            fprintf(stderr, "[ArkLink] Reloc %zu: symbol=%s, section_index=%u, value=0x%x, import_module=%s\n",
-                    i, reloc->symbol->name ? reloc->symbol->name : "(null)",
-                    reloc->symbol->section_index, reloc->symbol->value,
-                    reloc->symbol->import_module ? reloc->symbol->import_module : "(null)");
             if (reloc->symbol->import_module != NULL) {
                 
                 uint32_t import_idx = 0;
@@ -1136,12 +1125,9 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
                     }
                 }
                 symbol_addr = output->image_base + import_iat_rva + import_idx * sizeof(PE_IMPORT_LOOKUP_ENTRY);
-                fprintf(stderr, "[ArkLink]   External symbol: import_idx=%u, symbol_addr=0x%llx\n", import_idx, (unsigned long long)symbol_addr);
             } else {
                 
                 symbol_addr = output->image_base + output->section_maps[reloc->symbol->section_index].rva + reloc->symbol->value;
-                fprintf(stderr, "[ArkLink]   Local symbol: section_rva=0x%x, symbol_value=0x%x, symbol_addr=0x%llx\n",
-                        output->section_maps[reloc->symbol->section_index].rva, reloc->symbol->value, (unsigned long long)symbol_addr);
             }
 
             uint32_t reloc_file_offset = output->section_maps[reloc->section_index].file_offset + reloc->offset;
@@ -1163,7 +1149,6 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
                     
                     uint32_t reloc_rva = output->section_maps[reloc->section_index].rva + reloc->offset;
                     uint32_t value = (uint32_t)(symbol_addr + reloc->addend - (output->image_base + reloc_rva + 4));
-                    fprintf(stderr, "[ArkLink]   PC32: reloc_rva=0x%x, addend=%d, value=0x%x\n", reloc_rva, reloc->addend, value);
                     memcpy(output->data + reloc_file_offset, &value, sizeof(uint32_t));
                     break;
                 }

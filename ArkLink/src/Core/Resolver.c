@@ -41,11 +41,8 @@ static int symbol_table_add(SymbolTable* table, const ArkResolverSymbol* sym) {
                 table->symbols[i] = *sym;
             } else if (table->symbols[i].section_index > 0 && sym->section_index > 0) {
                 
-                fprintf(stderr, "[ArkLink] Warning: Symbol '%s' defined multiple times, using first definition (section=%u)\n", 
-                        sym->name, table->symbols[i].section_index);
             } else {
                 
-                fprintf(stderr, "[ArkLink] Symbol '%s': keeping existing definition\n", sym->name);
             }
             return 1;
         }
@@ -154,12 +151,8 @@ ArkLinkResult ark_resolver_resolve(ArkLinkContext* ctx, ArkLinkUnit* const* unit
             
             if (sym_desc->section_index > 0) {
                 sym.section_index = unit_sec_start[i] + sym_desc->section_index - 1;  
-                fprintf(stderr, "[ArkLink] Symbol '%s': unit=%zu, local_sec=%u, global_sec=%u\n", 
-                        sym.name ? sym.name : "(null)", i, sym_desc->section_index, sym.section_index);
             } else {
                 sym.section_index = 0;
-                fprintf(stderr, "[ArkLink] Symbol '%s': unit=%zu, undefined (section=0)\n", 
-                        sym.name ? sym.name : "(null)", i);
             }
             sym.value = (uint32_t)sym_desc->value;
             sym.size = sym_desc->size;
@@ -276,13 +269,8 @@ ArkLinkResult ark_resolver_resolve(ArkLinkContext* ctx, ArkLinkUnit* const* unit
     }
 
     if (entry_sym) {
-
         out_plan->backend_input->entry_section = entry_sym->section_index + 1;
         out_plan->backend_input->entry_offset = entry_sym->value;
-        fprintf(stderr, "[ArkLink] Entry point: symbol=%s, section=%u, offset=0x%x\n",
-                entry_sym->name, out_plan->backend_input->entry_section, out_plan->backend_input->entry_offset);
-    } else {
-        fprintf(stderr, "[ArkLink] Warning: No entry point symbol found (_start, main or _ZN4mainEv), using default\n");
     }
 
     for (size_t i = 0; i < sym_table.symbol_count; i++) {
@@ -316,17 +304,7 @@ ArkLinkResult ark_resolver_resolve(ArkLinkContext* ctx, ArkLinkUnit* const* unit
                     ArkResolverSymbol* global_sym = find_symbol(&sym_table, sym_name);
                     if (global_sym) {
                         reloc.symbol = global_sym;
-                        fprintf(stderr, "[ArkLink] Reloc: unit=%zu, local_sym_idx=%u, symbol_name=%s, section=%u\n",
-                                i, reloc_desc->sym_idx, 
-                                reloc.symbol->name ? reloc.symbol->name : "(null)",
-                                reloc.symbol->section_index);
-                    } else {
-                        fprintf(stderr, "[ArkLink] Reloc: unit=%zu, local_sym_idx=%u, symbol_name=%s NOT FOUND in global table\n",
-                                i, reloc_desc->sym_idx, sym_name ? sym_name : "(null)");
                     }
-                } else {
-                    fprintf(stderr, "[ArkLink] Reloc: unit=%zu, local_sym_idx=%u OUT OF RANGE (unit symbol count=%zu)\n",
-                            i, reloc_desc->sym_idx, unit->symbol_count);
                 }
 
                 if (!reloc_table_add(&reloc_table, &reloc)) {

@@ -5,8 +5,6 @@
 #include <string.h>
 #include <sys/stat.h>
 
-extern size_t strlen(const char *s);
-extern int strcmp(const char *s1, const char *s2);
 #ifdef _WIN32
 #include <direct.h>
 #include <windows.h>

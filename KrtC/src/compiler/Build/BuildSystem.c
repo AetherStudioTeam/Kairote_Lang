@@ -1,11 +1,11 @@
 #include "BuildSystem.h"
 #include "../Driver/ArkLinkIntegration.h"
+#include "../../Core/Utils/KrtCommon.h"
 #include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
 
 KrtBuildContext* KrtBuildContextCreate(KrtConfig* config, KrtPlatform* platform) {
-    KrtBuildContext* ctx = (KrtBuildContext*)malloc(sizeof(KrtBuildContext));
+    KrtBuildContext* ctx = (KrtBuildContext*)KRT_MALLOC(sizeof(KrtBuildContext));
     if (!ctx) return NULL;
 
     memset(ctx, 0, sizeof(KrtBuildContext));
@@ -18,7 +18,7 @@ KrtBuildContext* KrtBuildContextCreate(KrtConfig* config, KrtPlatform* platform)
 
 void KrtBuildContextDestroy(KrtBuildContext* ctx) {
     if (!ctx) return;
-    free(ctx);
+    KRT_FREE(ctx);
 }
 
 int KrtBuildExecute(KrtBuildContext* ctx, const char* input_file, const char* output_file) {

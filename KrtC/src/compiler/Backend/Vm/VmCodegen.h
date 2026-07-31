@@ -2,8 +2,8 @@
 #define KRT_VM_CODEGEN_H
 
 #include "../../Middle/Ir/Ir.h"
-#include "../../../../Shared/Bytecode.h"
-#include "../../../../Shared/BytecodeGenerator.h"
+#include "Bytecode.h"
+#include "BytecodeGenerator.h"
 
 void KrtVmCodegenGenerate(KrtIRModule* ir_module, KrtChunk* chunk);
 

@@ -9,8 +9,14 @@
 #if !defined(_WIN32) && !defined(__MINGW32__)
 #include <sys/types.h>
 #include <sys/sysinfo.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #endif
+
+#include "font_data.h"
 
 extern void *memset(void *s, int c, size_t n);
 extern void *memcpy(void *dest, const void *src, size_t n);
@@ -60,11 +66,11 @@ KRT_RUNTIME_EXPORT void KRT_API _print_string(const char* str) {
     
     int wlen = MultiByteToWideChar(CP_UTF8, 0, str, (int)len, NULL, 0);
     if (wlen > 0) {
-        wchar_t* wstr = (wchar_t*)malloc(wlen * sizeof(wchar_t));
+        wchar_t* wstr = (wchar_t*)KRT_MALLOC(wlen * sizeof(wchar_t));
         if (wstr) {
             MultiByteToWideChar(CP_UTF8, 0, str, (int)len, wstr, wlen);
             WriteConsoleW(hStdOut, wstr, wlen, &written, NULL);
-            free(wstr);
+            KRT_FREE(wstr);
             return;
         }
     }
@@ -82,6 +88,11 @@ KRT_RUNTIME_EXPORT void KRT_API _print_number(int num) {
     char buffer[32];
     int i = 30;
     int negative = 0;
+    
+    if (num == INT32_MIN) {
+        _print_string("-2147483648");
+        return;
+    }
     
     if (num < 0) {
         negative = 1;
@@ -108,6 +119,7 @@ KRT_RUNTIME_EXPORT void KRT_API _print_int(int num) {
 
 KRT_RUNTIME_EXPORT void KRT_API _print_double(double num) {
     char buffer[64];
+    snprintf(buffer, sizeof(buffer), "%g", num);
     _print_string(buffer);
 }
 
@@ -115,6 +127,11 @@ KRT_RUNTIME_EXPORT void KRT_API _print_int64(long long num) {
     char buffer[32];
     int i = 30;
     int negative = 0;
+    
+    if (num == INT64_MIN) {
+        _print_string("-9223372036854775808");
+        return;
+    }
     
     if (num < 0) {
         negative = 1;
@@ -241,89 +258,23 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtStrdup(const char* src) {
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtSin(double x) {
-    
-    double result = 0.0;
-    double term = x;
-    int sign = 1;
-    
-    const double PI = 3.14159265358979323846;
-    while (x > PI) x -= 2 * PI;
-    while (x < -PI) x += 2 * PI;
-    
-    for (int i = 1; i <= 10; i++) {
-        result += sign * term;
-        
-        term *= x * x / ((2 * i) * (2 * i + 1));
-        sign = -sign;
-    }
-    
-    return result;
+    return sin(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtCos(double x) {
-    
-    double result = 0.0;
-    double term = 1.0;
-    int sign = 1;
-    
-    const double PI = 3.14159265358979323846;
-    while (x > PI) x -= 2 * PI;
-    while (x < -PI) x += 2 * PI;
-    
-    for (int i = 0; i < 10; i++) {
-        result += sign * term;
-        
-        term *= x * x / ((2 * i + 1) * (2 * i + 2));
-        sign = -sign;
-    }
-    
-    return result;
+    return cos(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtTan(double x) {
-    
-    double cos_val = KrtCos(x);
-    if (cos_val == 0.0) {
-        
-        return (x > 0) ? 1e10 : -1e10;
-    }
-    return KrtSin(x) / cos_val;
+    return tan(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtSqrt(double x) {
-    if (x < 0) return 0.0;
-    if (x == 0) return 0.0;
-    
-    double guess = x / 2.0;
-    double prev = 0.0;
-    
-    while (guess != prev) {
-        prev = guess;
-        guess = (guess + x / guess) / 2.0;
-    }
-    
-    return guess;
+    return sqrt(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtPow(double base, double exp) {
-    
-    if (exp == 0) return 1.0;
-    if (base == 0) return 0.0;
-    
-    double result = 1.0;
-    int int_exp = (int)exp;
-    
-    if (int_exp > 0) {
-        for (int i = 0; i < int_exp; i++) {
-            result *= base;
-        }
-    } else {
-        for (int i = 0; i < -int_exp; i++) {
-            result /= base;
-        }
-    }
-    
-    return result;
+    return pow(base, exp);
 }
 
 KRT_RUNTIME_EXPORT void KRT_API KrtSleep(int seconds) {
@@ -379,6 +330,10 @@ KRT_RUNTIME_EXPORT char* KRT_API _KrtIntToString_value(int64_t num) {
     static char buffer[64];
     int i = 62;
     int negative = 0;
+    
+    if (num == INT64_MIN) {
+        return KrtStrdup("-9223372036854775808");
+    }
     
     if (num < 0) {
         negative = 1;
@@ -477,6 +432,53 @@ KRT_RUNTIME_EXPORT long long KRT_API timer_elapsed_int(void) {
 KRT_RUNTIME_EXPORT long long KRT_API timer_current_int(void) {
     return (long long)GetTickCount64();
 }
+#else
+#include <sys/time.h>
+
+static unsigned long long g_timer_start_ticks_dbl = 0;
+static unsigned long long g_timer_start_ticks_int = 0;
+
+static unsigned long long get_tick_count_us(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (unsigned long long)(tv.tv_sec) * 1000000ULL + (unsigned long long)(tv.tv_usec);
+}
+
+KRT_RUNTIME_EXPORT double KRT_API timer_start(void) {
+    g_timer_start_ticks_dbl = get_tick_count_us();
+    return (double)g_timer_start_ticks_dbl / 1000000.0;
+}
+
+KRT_RUNTIME_EXPORT double KRT_API timer_elapsed(void) {
+    if (g_timer_start_ticks_dbl == 0) {
+        return -1.0;
+    }
+    unsigned long long current = get_tick_count_us();
+    unsigned long long elapsed = (current >= g_timer_start_ticks_dbl) ? (current - g_timer_start_ticks_dbl) : (g_timer_start_ticks_dbl - current);
+    return (double)elapsed / 1000000.0;
+}
+
+KRT_RUNTIME_EXPORT double KRT_API timer_current(void) {
+    return (double)get_tick_count_us() / 1000000.0;
+}
+
+KRT_RUNTIME_EXPORT long long KRT_API timer_start_int(void) {
+    g_timer_start_ticks_int = get_tick_count_us();
+    return (long long)g_timer_start_ticks_int;
+}
+
+KRT_RUNTIME_EXPORT long long KRT_API timer_elapsed_int(void) {
+    if (g_timer_start_ticks_int == 0) {
+        return -1;
+    }
+    unsigned long long current = get_tick_count_us();
+    unsigned long long elapsed = (current >= g_timer_start_ticks_int) ? (current - g_timer_start_ticks_int) : (g_timer_start_ticks_int - current);
+    return (long long)elapsed;
+}
+
+KRT_RUNTIME_EXPORT long long KRT_API timer_current_int(void) {
+    return (long long)get_tick_count_us();
+}
 #endif
 
 KRT_RUNTIME_EXPORT void KRT_API KrtPrint(const char* str) {
@@ -570,7 +572,11 @@ KRT_RUNTIME_EXPORT int KRT_API KrtRename(const char* oldname, const char* newnam
     return rename(oldname, newname);
 }
 
-static char* KrtStrtokLast = NULL;
+#ifdef _WIN32
+static __declspec(thread) char* KrtStrtokLast = NULL;
+#else
+static __thread char* KrtStrtokLast = NULL;
+#endif
 
 KRT_RUNTIME_EXPORT char* KRT_API KrtStrtok(char* str, const char* delim) {
     if (!delim) return NULL;
@@ -635,88 +641,27 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtStrlwr(char* str) {
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtLog(double x) {
-    if (x <= 0.0) return -1.0;  
-    
-    double y = (x - 1.0) / (x + 1.0);
-    double result = 0.0;
-    double term = y;
-    double y_squared = y * y;
-    
-    for (int i = 1; i < 20; i++) {
-        result += term / (2 * i - 1);
-        term *= y_squared;
-    }
-    
-    return 2.0 * result;
+    return log(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtLog10(double x) {
-    if (x <= 0.0) return -1.0;  
-    
-    const double LOG_10 = 2.30258509299404568402;  
-    return KrtLog(x) / LOG_10;
+    return log10(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtExp(double x) {
-    
-    double result = 1.0;
-    double term = 1.0;
-    
-    for (int i = 1; i < 30; i++) {
-        term *= x / i;
-        result += term;
-        
-        if (term < 1e-15) break;
-    }
-    
-    return result;
+    return exp(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtAsin(double x) {
-    if (x < -1.0 || x > 1.0) return 0.0;  
-    
-    double sqrt_val = KrtSqrt(1.0 - x * x);
-    if (sqrt_val == 0.0) {
-        return (x > 0) ? 1.57079632679489661923 : -1.57079632679489661923;  
-    }
-    
-    return KrtAtan(x / sqrt_val);
+    return asin(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtAcos(double x) {
-    if (x < -1.0 || x > 1.0) return 0.0;  
-    
-    const double PI_2 = 1.57079632679489661923;  
-    return PI_2 - KrtAsin(x);
+    return acos(x);
 }
 
 KRT_RUNTIME_EXPORT double KRT_API KrtAtan(double x) {
-    
-    const double PI_2 = 1.57079632679489661923;  
-    
-    if (x > 1.0) {
-        return PI_2 - KrtAtan(1.0 / x);
-    } else if (x < -1.0) {
-        return -PI_2 - KrtAtan(1.0 / x);
-    }
-    
-    double result = 0.0;
-    double term = x;
-    double x_squared = x * x;
-    
-    for (int i = 1; i < 30; i++) {
-        if (i % 2 == 1) {
-            result += term / i;
-        } else {
-            result -= term / i;
-        }
-        
-        term *= x_squared;
-        
-        if (term < 1e-15) break;
-    }
-    
-    return result;
+    return atan(x);
 }
 
 KRT_RUNTIME_EXPORT KrtArray* KRT_API array_create(size_t element_size, size_t initial_capacity) {
@@ -742,7 +687,7 @@ KRT_RUNTIME_EXPORT KrtArray* KRT_API array_create(size_t element_size, size_t in
     return array;
 }
 
-KRT_RUNTIME_EXPORT void KRT_API array_KrtFree(KrtArray* array) {
+KRT_RUNTIME_EXPORT void KRT_API array_free(KrtArray* array) {
     if (!array) return;
     
     KrtFree(array->data);
@@ -951,7 +896,7 @@ KRT_RUNTIME_EXPORT KrtHashMap* KRT_API hashmap_create(size_t initial_capacity) {
     return map;
 }
 
-KRT_RUNTIME_EXPORT void KRT_API hashmap_KrtFree(KrtHashMap* map) {
+KRT_RUNTIME_EXPORT void KRT_API hashmap_free(KrtHashMap* map) {
     if (!map) return;
     
     for (size_t i = 0; i < map->capacity; i++) {
@@ -1085,16 +1030,21 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtDate() {
     time_t current_time;
     time(&current_time);
     
-    struct tm* local_time = localtime(&current_time);
-    if (!local_time) return NULL;
+#ifdef _WIN32
+    struct tm local_time;
+    if (localtime_s(&local_time, &current_time) != 0) return NULL;
+#else
+    struct tm local_time;
+    if (localtime_r(&current_time, &local_time) == NULL) return NULL;
+#endif
     
     char* date_str = (char*)KrtMalloc(11); 
     if (!date_str) return NULL;
     
     KRT_SPRINTF_S(date_str, 11, "%04d-%02d-%02d", 
-            local_time->tm_year + 1900, 
-            local_time->tm_mon + 1, 
-            local_time->tm_mday);
+            local_time.tm_year + 1900, 
+            local_time.tm_mon + 1, 
+            local_time.tm_mday);
     
     return date_str;
 }
@@ -1105,8 +1055,13 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtTimeFormat(const char* format) {
     time_t current_time;
     time(&current_time);
     
-    struct tm* local_time = localtime(&current_time);
-    if (!local_time) return NULL;
+#ifdef _WIN32
+    struct tm local_time;
+    if (localtime_s(&local_time, &current_time) != 0) return NULL;
+#else
+    struct tm local_time;
+    if (localtime_r(&current_time, &local_time) == NULL) return NULL;
+#endif
     
     size_t format_len = KrtStrlen(format);
     size_t result_len = format_len * 3; 
@@ -1119,31 +1074,31 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtTimeFormat(const char* format) {
             char format_char = format[i + 1];
             switch (format_char) {
                 case 'Y': 
-                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%04d", local_time->tm_year + 1900);
+                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%04d", local_time.tm_year + 1900);
                     i++;
                     break;
                 case 'y': 
-                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", (local_time->tm_year + 1900) % 100);
+                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", (local_time.tm_year + 1900) % 100);
                     i++;
                     break;
                 case 'm': 
-                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time->tm_mon + 1);
+                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time.tm_mon + 1);
                     i++;
                     break;
                 case 'd': 
-                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time->tm_mday);
+                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time.tm_mday);
                     i++;
                     break;
                 case 'H': 
-                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time->tm_hour);
+                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time.tm_hour);
                     i++;
                     break;
                 case 'M': 
-                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time->tm_min);
+                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time.tm_min);
                     i++;
                     break;
                 case 'S': 
-                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time->tm_sec);
+                    result_index += KRT_SPRINTF_S(result + result_index, result_len - result_index + 1, "%02d", local_time.tm_sec);
                     i++;
                     break;
                 default:
@@ -1289,11 +1244,11 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtStrreplace(const char* src, const char* old_
         return KrtStrdup(src);
     }
     
-    const char* new = new_sub ? new_sub : "";
+    const char* replacement = new_sub ? new_sub : "";
     
     size_t src_len = KrtStrlen(src);
     size_t old_len = KrtStrlen(old_sub);
-    size_t new_len = KrtStrlen(new);
+    size_t new_len = KrtStrlen(replacement);
     
     size_t max_len = src_len;
     const char* p = src;
@@ -1320,7 +1275,7 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtStrreplace(const char* src, const char* old_
             src_pos += old_len;
             
             for (size_t i = 0; i < new_len; i++) {
-                *dest++ = new[i];
+                *dest++ = replacement[i];
             }
         } else {
             
@@ -1366,11 +1321,6 @@ KRT_RUNTIME_EXPORT double KRT_API KrtTanh(double x) {
 
 #ifdef _WIN32
 #else
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <netdb.h>
 #define SOCKET int
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
@@ -1413,18 +1363,27 @@ KRT_RUNTIME_EXPORT int KRT_API KrtConnect(KrtSocketHandle socket, const char* ad
     
     SOCKET sock = *(SOCKET*)socket;
     
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", port);
     
-    if (inet_pton(AF_INET, address, &server_addr.sin_addr) <= 0) {
-        
-        struct hostent* host = gethostbyname(address);
-        if (!host) return -1;
-        memcpy(&server_addr.sin_addr, host->h_addr_list[0], host->h_length);
+    struct addrinfo hints, *result, *rp;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    
+    int ret = getaddrinfo(address, port_str, &hints, &result);
+    if (ret != 0) return -1;
+    
+    int connected = -1;
+    for (rp = result; rp != NULL; rp = rp->ai_next) {
+        if (connect(sock, rp->ai_addr, (int)rp->ai_addrlen) == 0) {
+            connected = 0;
+            break;
+        }
     }
     
-    return connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == 0 ? 0 : -1;
+    freeaddrinfo(result);
+    return connected;
 }
 
 KRT_RUNTIME_EXPORT int KRT_API KrtBind(KrtSocketHandle socket, const char* address, int port) {
@@ -1922,7 +1881,7 @@ KRT_RUNTIME_EXPORT void KRT_API KrtDrawRect(KrtWindow window, KrtRect rect, KrtC
     }
 }
 
-KRT_RUNTIME_EXPORT void KRT_API krtDrawCircle(KrtWindow window, KrtPoint center, int radius, KrtColor color) {
+KRT_RUNTIME_EXPORT void KRT_API KrtDrawCircle(KrtWindow window, KrtPoint center, int radius, KrtColor color) {
     if (!window || radius <= 0) return;
     
     KrtWindowImpl* win = (KrtWindowImpl*)window;
@@ -1979,14 +1938,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtDrawText(KrtWindow window, const char* text, 
     int char_width = 8;
     int char_height = 16;
     
-    static const unsigned char font_data[128][16] = {
-        
-        {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-        
-        {0x00, 0x00, 0x18, 0x3C, 0x3C, 0x3C, 0x18, 0x18, 0x18, 0x00, 0x18, 0x18, 0x00, 0x00, 0x00, 0x00},
-        
-    };
-    
     for (int i = 0; text[i] != '\0'; i++) {
         unsigned char c = (unsigned char)text[i];
         if (c < 32 || c > 126) continue; 
@@ -1995,7 +1946,7 @@ KRT_RUNTIME_EXPORT void KRT_API KrtDrawText(KrtWindow window, const char* text, 
         int char_y = position.y;
         
         for (int row = 0; row < char_height; row++) {
-            unsigned char font_row = font_data[c][row];
+            unsigned char font_row = font_data[c - 32][row];
             for (int col = 0; col < char_width; col++) {
                 if (font_row & (0x80 >> col)) {
                     int pixel_x = char_x + col;
@@ -2067,24 +2018,116 @@ KRT_RUNTIME_EXPORT void* KRT_API KrtAsInstance(void* obj, const char* typeName) 
     return NULL;
 }
 
-static KrtMutex g_monitor_mutex = NULL;
+#define MONITOR_LOCK_TABLE_SIZE 256
+
+typedef struct MonitorLockEntry {
+    void* obj;
+    KrtMutex mutex;
+    int ref_count;
+    struct MonitorLockEntry* next;
+} MonitorLockEntry;
+
+static KrtMutex g_monitor_table_mutex = NULL;
+static MonitorLockEntry* g_monitor_lock_table[MONITOR_LOCK_TABLE_SIZE] = {0};
+
+static unsigned int monitor_hash(void* obj) {
+    uintptr_t addr = (uintptr_t)obj;
+    return (unsigned int)(addr % MONITOR_LOCK_TABLE_SIZE);
+}
+
+static KrtMutex monitor_get_lock(void* obj) {
+    unsigned int hash = monitor_hash(obj);
+    
+    MonitorLockEntry* entry = g_monitor_lock_table[hash];
+    while (entry) {
+        if (entry->obj == obj) {
+            entry->ref_count++;
+            return entry->mutex;
+        }
+        entry = entry->next;
+    }
+    
+    KrtMutex new_mutex = KrtMutexCreateFunc();
+    if (!new_mutex) return NULL;
+    
+    MonitorLockEntry* new_entry = (MonitorLockEntry*)KrtMalloc(sizeof(MonitorLockEntry));
+    if (!new_entry) {
+        KrtMutexFreeFunc(new_mutex);
+        return NULL;
+    }
+    new_entry->obj = obj;
+    new_entry->mutex = new_mutex;
+    new_entry->ref_count = 1;
+    new_entry->next = g_monitor_lock_table[hash];
+    g_monitor_lock_table[hash] = new_entry;
+    
+    return new_mutex;
+}
+
+static void monitor_release_lock(void* obj) {
+    unsigned int hash = monitor_hash(obj);
+    
+    MonitorLockEntry* entry = g_monitor_lock_table[hash];
+    MonitorLockEntry* prev = NULL;
+    while (entry) {
+        if (entry->obj == obj) {
+            entry->ref_count--;
+            if (entry->ref_count <= 0) {
+                KrtMutexFreeFunc(entry->mutex);
+                if (prev) {
+                    prev->next = entry->next;
+                } else {
+                    g_monitor_lock_table[hash] = entry->next;
+                }
+                KrtFree(entry);
+            }
+            return;
+        }
+        prev = entry;
+        entry = entry->next;
+    }
+}
 
 KRT_RUNTIME_EXPORT void KRT_API Monitor_Enter(void* obj) {
     if (!obj) return;
     
-    if (!g_monitor_mutex) {
-        g_monitor_mutex = KrtMutexCreateFunc();
+    if (!g_monitor_table_mutex) {
+        g_monitor_table_mutex = KrtMutexCreateFunc();
     }
     
-    KrtMutexLockFunc(g_monitor_mutex);
+    KrtMutexLockFunc(g_monitor_table_mutex);
+    KrtMutex lock = monitor_get_lock(obj);
+    KrtMutexUnlockFunc(g_monitor_table_mutex);
+    
+    if (lock) {
+        KrtMutexLockFunc(lock);
+    }
 }
 
 KRT_RUNTIME_EXPORT void KRT_API Monitor_Exit(void* obj) {
     if (!obj) return;
     
-    if (g_monitor_mutex) {
-        KrtMutexUnlockFunc(g_monitor_mutex);
+    if (!g_monitor_table_mutex) return;
+    
+    KrtMutexLockFunc(g_monitor_table_mutex);
+    KrtMutex lock = NULL;
+    
+    unsigned int hash = monitor_hash(obj);
+    MonitorLockEntry* entry = g_monitor_lock_table[hash];
+    while (entry) {
+        if (entry->obj == obj) {
+            lock = entry->mutex;
+            break;
+        }
+        entry = entry->next;
     }
+    
+    if (lock) {
+        KrtMutexUnlockFunc(lock);
+    }
+    
+    monitor_release_lock(obj);
+    KrtMutexUnlockFunc(g_monitor_table_mutex);
 }
 
 KRT_RUNTIME_EXPORT void KRT_API Dispose(void* obj) {
@@ -2115,7 +2158,6 @@ KRT_RUNTIME_EXPORT void* KRT_API KrtNullConditional(void* obj, const char* membe
     return obj;
 }
 
-// Thread-local storage for current exception
 #ifdef _WIN32
 static __declspec(thread) void* g_current_exception = NULL;
 #else
@@ -2273,15 +2315,12 @@ KRT_RUNTIME_EXPORT char* KRT_API KrtPointerToString(void* value) {
     return result;
 }
 
-// Tuple implementation
 KRT_RUNTIME_EXPORT void* KRT_API KrtCreateTuple(int element_count) {
     if (element_count <= 0) return NULL;
     
-    // Allocate array of void* for tuple elements
     void** tuple = (void**)KRT_MALLOC(element_count * sizeof(void*));
     if (!tuple) return NULL;
     
-    // Initialize all elements to NULL
     for (int i = 0; i < element_count; i++) {
         tuple[i] = NULL;
     }
@@ -2303,12 +2342,8 @@ KRT_RUNTIME_EXPORT void* KRT_API KrtTupleGetElement(void* tuple, int index) {
     return elements[index];
 }
 
-// ============================================================================
-// Pointer and Memory Operations
-// ============================================================================
-
 KRT_RUNTIME_EXPORT void* KRT_API KrtGetVariableAddress(const char* var_name) {
-    // This is a placeholder - in real implementation would need
+    // This is a placeholder in real implementation would need
     // access to variable storage. For now returns NULL.
     (void)var_name;
     return NULL;
@@ -2326,7 +2361,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtStorePtr(void* base, int offset, void* value)
     *(void**)(ptr + offset) = value;
 }
 
-// Stack allocation (using malloc for now - real implementation would use actual stack)
 KRT_RUNTIME_EXPORT void* KRT_API KrtStackAlloc(int size) {
     if (size <= 0) return NULL;
     // In a real implementation, this would allocate from the stack
@@ -2334,7 +2368,6 @@ KRT_RUNTIME_EXPORT void* KRT_API KrtStackAlloc(int size) {
     return KrtMalloc((size_t)size);
 }
 
-// Object pinning for fixed statements
 static void** g_pinned_objects = NULL;
 static int g_pinned_count = 0;
 static int g_pinned_capacity = 0;
@@ -2364,7 +2397,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtUnpinObject(void* obj) {
     
     for (int i = 0; i < g_pinned_count; i++) {
         if (g_pinned_objects[i] == obj) {
-            // Remove by shifting
             for (int j = i; j < g_pinned_count - 1; j++) {
                 g_pinned_objects[j] = g_pinned_objects[j + 1];
             }
@@ -2373,10 +2405,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtUnpinObject(void* obj) {
         }
     }
 }
-
-// ============================================================================
-// Async/Await Support
-// ============================================================================
 
 typedef struct KrtTask {
     int state;
@@ -2414,7 +2442,6 @@ KRT_RUNTIME_EXPORT void* KRT_API KrtAwaitTask(void* task_handle) {
     // In a real implementation, this would yield control
     // For now, we just wait (busy wait - not ideal but works for basic cases)
     while (!task->is_completed) {
-        // Yield or sleep
         KrtSleepMs(1);
     }
     
@@ -2427,9 +2454,6 @@ KRT_RUNTIME_EXPORT int KRT_API KrtTaskIsCompleted(void* task_handle) {
     return task->is_completed;
 }
 
-// ============================================================================
-// LINQ Support Functions
-// ============================================================================
 
 KRT_RUNTIME_EXPORT void* KRT_API KrtLinqWhere(void* source, void* predicate) {
     // Placeholder - would filter elements based on predicate
@@ -2458,9 +2482,6 @@ KRT_RUNTIME_EXPORT void* KRT_API KrtLinqSelect(void* source, void* selector) {
     return source;
 }
 
-// ============================================================================
-// Delegate Support
-// ============================================================================
 
 typedef struct KrtDelegate {
     void* target;
@@ -2485,11 +2506,30 @@ KRT_RUNTIME_EXPORT void* KRT_API KrtInvokeDelegate(void* delegate_handle, void**
     
     if (!delegate->method_ptr) return NULL;
     
-    // In a real implementation, this would call the method
-    // For now, just return NULL
-    (void)args;
-    (void)arg_count;
-    return NULL;
+    void* target = delegate->target;
+    
+    typedef void* (*DelegateMethod0)(void*);
+    typedef void* (*DelegateMethod1)(void*, void*);
+    typedef void* (*DelegateMethod2)(void*, void*, void*);
+    typedef void* (*DelegateMethod3)(void*, void*, void*, void*);
+    typedef void* (*DelegateMethod4)(void*, void*, void*, void*, void*);
+    typedef void* (*DelegateMethod5)(void*, void*, void*, void*, void*, void*);
+    typedef void* (*DelegateMethod6)(void*, void*, void*, void*, void*, void*, void*);
+    typedef void* (*DelegateMethod7)(void*, void*, void*, void*, void*, void*, void*, void*);
+    typedef void* (*DelegateMethod8)(void*, void*, void*, void*, void*, void*, void*, void*, void*);
+    
+    switch (arg_count) {
+        case 0: return ((DelegateMethod0)delegate->method_ptr)(target);
+        case 1: return ((DelegateMethod1)delegate->method_ptr)(target, args[0]);
+        case 2: return ((DelegateMethod2)delegate->method_ptr)(target, args[0], args[1]);
+        case 3: return ((DelegateMethod3)delegate->method_ptr)(target, args[0], args[1], args[2]);
+        case 4: return ((DelegateMethod4)delegate->method_ptr)(target, args[0], args[1], args[2], args[3]);
+        case 5: return ((DelegateMethod5)delegate->method_ptr)(target, args[0], args[1], args[2], args[3], args[4]);
+        case 6: return ((DelegateMethod6)delegate->method_ptr)(target, args[0], args[1], args[2], args[3], args[4], args[5]);
+        case 7: return ((DelegateMethod7)delegate->method_ptr)(target, args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+        case 8: return ((DelegateMethod8)delegate->method_ptr)(target, args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
+        default: return NULL;
+    }
 }
 
 KRT_RUNTIME_EXPORT void KRT_API KrtFreeDelegate(void* delegate_handle) {
@@ -2501,11 +2541,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtFreeDelegate(void* delegate_handle) {
     KrtFree(delegate);
 }
 
-// ============================================================================
-// Generic Static Field Support
-// ============================================================================
-
-// Hash table for generic static fields
 #define GENERIC_STATIC_TABLE_SIZE 256
 
 typedef struct GenericStaticEntry {
@@ -2546,7 +2581,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtSetGenericStaticField(const char* mangled_nam
     unsigned int hash = hash_string(mangled_name);
     GenericStaticEntry* entry = g_generic_static_table[hash];
     
-    // Check if entry already exists
     while (entry) {
         if (strcmp(entry->key, mangled_name) == 0) {
             entry->value = value;
@@ -2555,7 +2589,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtSetGenericStaticField(const char* mangled_nam
         entry = entry->next;
     }
     
-    // Create new entry
     entry = (GenericStaticEntry*)KrtMalloc(sizeof(GenericStaticEntry));
     if (!entry) return;
     
@@ -2578,11 +2611,6 @@ KRT_RUNTIME_EXPORT void KRT_API KrtClearGenericStaticFields(void) {
     }
 }
 
-// ============================================================================
-// Generic Constraint Support
-// ============================================================================
-
-// Type metadata structure for constraint checking
 typedef struct KrtTypeMetadata {
     char* type_name;
     int is_class;
@@ -2606,13 +2634,11 @@ KRT_RUNTIME_EXPORT int KRT_API KrtIsClass(void* obj) {
 
 KRT_RUNTIME_EXPORT int KRT_API KrtIsStruct(void* obj) {
     if (!obj) return 0;
-    // Value types would be handled differently
     return 0;
 }
 
 KRT_RUNTIME_EXPORT int KRT_API KrtImplementsInterface(void* obj, const char* interface_name) {
     if (!obj || !interface_name) return 0;
-    // In a full implementation, this would check the type's interface table
     return 0;
 }
 
@@ -2630,7 +2656,6 @@ KRT_RUNTIME_EXPORT int KRT_API KrtCheckGenericConstraint(void* obj, const char* 
     } else if (strcmp(constraint_type, "struct") == 0) {
         return KrtIsStruct(obj);
     } else {
-        // Check for interface or base class constraint
         if (KrtImplementsInterface(obj, constraint_type)) return 1;
         if (KrtInheritsFrom(obj, constraint_type)) return 1;
     }

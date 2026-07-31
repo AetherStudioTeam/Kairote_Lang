@@ -66,9 +66,7 @@ ArkLinkResult arklink_session_link_native(ArkLinkSession* session) {
             return result;
         }
 
-        char msg[256];
-        snprintf(msg, sizeof(msg), "Loaded: %s", session->inputs[i]);
-        log_message(session, ARK_LOG_DEBUG, msg);
+
     }
 
     log_message(session, ARK_LOG_INFO, "Resolving symbols...");

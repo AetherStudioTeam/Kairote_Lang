@@ -3,7 +3,7 @@
 
 #include "../../Core/Utils/KrtCommon.h"
 #include <stdio.h>
-#include "../Frontend/FrontendTemp/FrontendTemp/parser/Ast.h"
+#include "../Frontend/Parser/Ast.h"
 #include "../Middle/Ir/Ir.h"
 
 #define KRT_DEBUG_IR(fmt, ...) KRT_DEBUG_LOG("IR", fmt, ##__VA_ARGS__)
@@ -17,7 +17,7 @@ typedef enum {
     KRT_TARGET_EXE_PLATFORM     
 } KrtTargetPlatform;
 
-#include "../../../Shared/Bytecode.h"
+#include "Bytecode.h"
 
 typedef struct {
     FILE* output_file;

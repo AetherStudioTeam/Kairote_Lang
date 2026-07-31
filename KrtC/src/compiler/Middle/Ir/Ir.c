@@ -3,7 +3,7 @@
 #include "IrAssert.h"
 #include "IrObjectPool.h"
 #include "IrLazyAlloc.h"
-#include "../../../Core/Utils/KrtCommon.h"
+#include "Core/Utils/KrtCommon.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -18,32 +18,47 @@ typedef struct {
 
 static KrtIRBuilderExtensions* get_extensions(KrtIRBuilder* builder) {
     if (!builder) return NULL;
-    
-    static KrtIRBuilderExtensions extensions = {0};
-    static int initialized = 0;
-    
-    if (!initialized) {
-        extensions.pool_manager = KRT_CALLOC(1, sizeof(KrtIRPoolManager));
-        if (extensions.pool_manager) {
-            extensions.pool_manager->arena = NULL;
+
+    if (!builder->extensions) {
+        KrtIRBuilderExtensions* ext = (KrtIRBuilderExtensions*)KRT_CALLOC(1, sizeof(KrtIRBuilderExtensions));
+        if (!ext) return NULL;
+
+        ext->pool_manager = KRT_CALLOC(1, sizeof(KrtIRPoolManager));
+        if (ext->pool_manager) {
+            ext->pool_manager->arena = NULL;
             for (int i = 0; i < KRT_POOL_COUNT; i++) {
-                pool_init(&extensions.pool_manager->pools[i], g_pool_names[i], g_object_sizes[i], 64);
+                pool_init(&ext->pool_manager->pools[i], g_pool_names[i], g_object_sizes[i], 64);
             }
         }
-        
-        extensions.lazy_manager = KRT_CALLOC(1, sizeof(KrtLazyAllocManager));
-        if (extensions.lazy_manager) {
-            KrtIrLazyInit(extensions.lazy_manager);
+
+        ext->lazy_manager = KRT_CALLOC(1, sizeof(KrtLazyAllocManager));
+        if (ext->lazy_manager) {
+            KrtIrLazyInit(ext->lazy_manager);
         }
-        
-        initialized = 1;
+
+        builder->extensions = ext;
     }
-    
-    return &extensions;
+
+    return (KrtIRBuilderExtensions*)builder->extensions;
 }
 
-extern int strcmp(const char *s1, const char *s2);
-extern void *memset(void *s, int c, size_t n);
+static void destroy_extensions(KrtIRBuilder* builder) {
+    if (!builder || !builder->extensions) return;
+
+    KrtIRBuilderExtensions* ext = (KrtIRBuilderExtensions*)builder->extensions;
+
+    if (ext->pool_manager) {
+        KRT_FREE(ext->pool_manager);
+    }
+
+    if (ext->lazy_manager) {
+        KrtIrLazyDestroy(ext->lazy_manager);
+        KRT_FREE(ext->lazy_manager);
+    }
+
+    KRT_FREE(ext);
+    builder->extensions = NULL;
+}
 
 KRT_IR_INLINE KrtIRInst* ir_create_inst(KrtIRBuilder* builder) {
     if (builder->use_object_pool) {
@@ -284,8 +299,9 @@ KrtIRBuilder* KrtIrBuilderCreate(void) {
         goto cleanup;
     }
 
-    builder->use_object_pool = 0;  
+    builder->use_object_pool = 0;
     builder->use_lazy_alloc = 1;
+    builder->extensions = NULL;
 
     return builder;
 
@@ -304,7 +320,9 @@ cleanup:
 
 void KrtIrBuilderDestroy(KrtIRBuilder* builder) {
     if (!builder) return;
-    
+
+    destroy_extensions(builder);
+
     KrtIrModuleDestroy(builder->module);
     
     if (builder->arena) {

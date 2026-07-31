@@ -1,5 +1,6 @@
 #include "Value.h"
 #include "Object.h"
+#include "../src/Runtime/Runtime.h"
 #include <stdio.h>
 
 void KrtValueArrayInit(KrtValueArray* array) {

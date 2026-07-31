@@ -29,13 +29,13 @@ static double KrtGetTimeSec(void) {
 }
 
 IROptimizer* ir_optimizer_create(void) {
-    IROptimizer* optimizer = (IROptimizer*)calloc(1, sizeof(IROptimizer));
+    IROptimizer* optimizer = (IROptimizer*)KRT_CALLOC(1, sizeof(IROptimizer));
     return optimizer;
 }
 
 void ir_optimizer_destroy(IROptimizer* optimizer) {
     if (!optimizer) return;
-    free(optimizer);
+    KRT_FREE(optimizer);
 }
 
 static bool is_constant_value(KrtIRValue* value) {

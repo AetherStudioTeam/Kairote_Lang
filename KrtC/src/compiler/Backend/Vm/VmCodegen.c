@@ -1,6 +1,6 @@
 #include "VmCodegen.h"
 #include "../../../Core/Utils/KrtCommon.h"
-#include "../../../../Shared/BytecodeGenerator.h"
+#include "BytecodeGenerator.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -52,9 +52,9 @@ static void init_context(CodegenContext* ctx, KrtIRModule* module) {
 }
 
 static void free_context(CodegenContext* ctx) {
-    free(ctx->locals);
-    free(ctx->labels);
-    free(ctx->pending_jumps);
+    KRT_FREE(ctx->locals);
+    KRT_FREE(ctx->labels);
+    KRT_FREE(ctx->pending_jumps);
 }
 
 static int get_local_index(CodegenContext* ctx, const char* name) {
@@ -67,7 +67,7 @@ static int get_local_index(CodegenContext* ctx, const char* name) {
     if (ctx->local_count >= ctx->local_capacity) {
         int old_capacity = ctx->local_capacity;
         ctx->local_capacity = old_capacity < 8 ? 8 : old_capacity * 2;
-        ctx->locals = realloc(ctx->locals, ctx->local_capacity * sizeof(LocalMapping));
+        ctx->locals = KRT_REALLOC(ctx->locals, ctx->local_capacity * sizeof(LocalMapping));
     }
     
     int index = ctx->local_count;

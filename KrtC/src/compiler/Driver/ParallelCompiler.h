@@ -4,7 +4,7 @@
 #include "../../Core/Utils/KrtCommon.h"
 #include "Project.h"
 #include "../../Core/Platform/ThreadPool.h"
-#include "../Frontend/FrontendTemp/FrontendTemp/semantic/Generics.h"
+#include "../Frontend/Semantic/Generics.h"
 #include "ConfigManager.h"
 #include <pthread.h>
 

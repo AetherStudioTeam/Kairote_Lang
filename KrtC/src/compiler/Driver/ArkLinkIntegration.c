@@ -129,9 +129,11 @@ int KrtArkLinkAddRuntimeObjects(KrtArkLinkContext* ctx, const char* runtime_dir)
     
     const char* runtime_files[] = {
         "runtime.o",
-        "output_cache.o", 
+        "krt_memory.o",
+        "krt_string.o",
+        "krt_printf.o",
+        "krt_misc.o",
         "allocator.o",
-        "KrtString.o",
         NULL
     };
     
@@ -197,7 +199,24 @@ int KrtArkLinkLinkObjects(const char** obj_files, int obj_count,
         KrtError("Failed to create ArkLink context");
         return -1;
     }
-    
+
+    /* Add runtime objects (e.g. KrtString, KrtPrintf) so stdlib can resolve symbols. */
+    char exe_dir[KRT_MAX_PATH] = {0};
+    if (KrtGetExecutableDirectory(exe_dir, sizeof(exe_dir)) == 0) {
+        /* runtime_dir is the parent directory of the executable's directory. */
+        char runtime_dir[KRT_MAX_PATH] = {0};
+        KRT_STRNCPY(runtime_dir, exe_dir, sizeof(runtime_dir) - 1);
+        runtime_dir[sizeof(runtime_dir) - 1] = '\0';
+        char* last_sep = strrchr(runtime_dir, KRT_PATH_SEPARATOR);
+        if (!last_sep) last_sep = strrchr(runtime_dir, '/');
+        if (last_sep) {
+            *last_sep = '\0';
+            if (KrtPathExists(runtime_dir)) {
+                KrtArkLinkAddRuntimeObjects(ctx, runtime_dir);
+            }
+        }
+    }
+
     for (int i = 0; i < obj_count; i++) {
         KrtArkLinkAddObjectFile(ctx, obj_files[i]);
     }

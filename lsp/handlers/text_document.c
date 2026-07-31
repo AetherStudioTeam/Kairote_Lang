@@ -67,19 +67,13 @@ static int parse_range(const char* json, int* start_line, int* start_char, int* 
 }
 
 LspMessage* lsp_handle_text_document_did_open(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/didOpen received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
-    char* language_id = extract_string_value(text_doc, "languageId");
+    char* uri = extract_string_value(params, "uri");
+    char* language_id = extract_string_value(params, "languageId");
+    const char* text_doc = extract_string_value(params, "textDocument");
+
     int version = extract_int_value(text_doc, "version", 0);
     char* text = extract_string_value(text_doc, "text");
-    
+
     if (uri && text) {
         LSP_LOG_INFO("Opening document: %s (version %d)", uri, version);
         lsp_document_store_open(server->documents, uri, language_id, version, text);
@@ -99,17 +93,8 @@ LspMessage* lsp_handle_text_document_did_open(LspServer* server, const char* id,
 }
 
 LspMessage* lsp_handle_text_document_did_change(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/didChange received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
-    int version = extract_int_value(text_doc, "version", 0);
-    
+    char* uri = extract_string_value(params, "uri");
+
     const char* changes_start = strstr(params, "\"contentChanges\":");
     if (!changes_start || !uri) {
         free(uri);
@@ -160,12 +145,7 @@ LspMessage* lsp_handle_text_document_did_change(LspServer* server, const char* i
     if (change_count > 0) {
         if (changes[0].start_line == 0 && changes[0].start_char == 0 && 
             changes[0].end_line == 0 && changes[0].end_char == 0 &&
-            strstr(changes_start, "\"range\"") == NULL) {
-            LSP_LOG_DEBUG("Full document change detected");
-            lsp_document_store_change(server->documents, uri, version, changes[0].text);
-        } else {
-            LSP_LOG_DEBUG("Incremental change detected (%d changes)", change_count);
-            lsp_document_store_change_incremental(server->documents, uri, version, changes, change_count);
+
         }
         
         char* new_content = lsp_document_store_get_content(server->documents, uri);
@@ -187,59 +167,41 @@ LspMessage* lsp_handle_text_document_did_change(LspServer* server, const char* i
 }
 
 LspMessage* lsp_handle_text_document_did_close(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/didClose received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
-    
+    char* uri = extract_string_value(params, "uri");
+
     if (uri) {
         LSP_LOG_INFO("Closing document: %s", uri);
         lsp_document_store_close(server->documents, uri);
-        
+
         char params_json[1024];
         snprintf(params_json, sizeof(params_json), "{\"uri\":\"%s\",\"diagnostics\":[]}", uri);
         lsp_send_notification(server, "textDocument/publishDiagnostics", params_json);
     }
-    
+
     free(uri);
     return NULL;
 }
 
 LspMessage* lsp_handle_text_document_completion(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/completion received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
+    char* uri = extract_string_value(params, "uri");
     if (!uri) {
         return lsp_message_create_response(id, "{\"items\":[]}");
     }
-    
+
     LspDocument* doc = lsp_document_store_get(server->documents, uri);
     if (!doc || !doc->content) {
         free(uri);
         return lsp_message_create_response(id, "{\"items\":[]}");
     }
-    
-    const char* pos = strstr(params, "\"position\":");
+
     int line = 0, character = 0;
+    const char* pos = strstr(params, "\"position\":");
     if (pos) {
         line = extract_int_value(pos, "line", 0);
         character = extract_int_value(pos, "character", 0);
     }
-    
-    LSP_LOG_DEBUG("Completion at %s:%d:%d", uri, line, character);
-    
-    LspCompletionList* completions = lsp_get_completions(doc->content, line, character);
+
+    LspCompletionList* completions = lsp_get_completions(doc, line, character);
     if (!completions) {
         free(uri);
         return lsp_message_create_response(id, "{\"items\":[]}");
@@ -257,35 +219,11 @@ LspMessage* lsp_handle_text_document_completion(LspServer* server, const char* i
 }
 
 LspMessage* lsp_handle_text_document_hover(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/hover received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
-    if (!uri) {
-        return lsp_message_create_response(id, "null");
-    }
-    
-    LspDocument* doc = lsp_document_store_get(server->documents, uri);
-    if (!doc || !doc->content) {
-        free(uri);
-        return lsp_message_create_response(id, "null");
-    }
-    
-    const char* pos = strstr(params, "\"position\":");
-    int line = 0, character = 0;
-    if (pos) {
-        line = extract_int_value(pos, "line", 0);
-        character = extract_int_value(pos, "character", 0);
-    }
-    
-    char* hover_content = lsp_get_hover_info(doc->content, line, character);
+    char* uri = extract_string_value(params, "uri");
+    char* hover_content = lsp_get_hover_content(server, uri);
+
     free(uri);
-    
+
     if (!hover_content) {
         return lsp_message_create_response(id, "null");
     }
@@ -303,35 +241,11 @@ LspMessage* lsp_handle_text_document_hover(LspServer* server, const char* id, co
 }
 
 LspMessage* lsp_handle_text_document_definition(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/definition received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
-    if (!uri) {
-        return lsp_message_create_response(id, "null");
-    }
-    
-    LspDocument* doc = lsp_document_store_get(server->documents, uri);
-    if (!doc || !doc->content) {
-        free(uri);
-        return lsp_message_create_response(id, "null");
-    }
-    
-    const char* pos = strstr(params, "\"position\":");
-    int line = 0, character = 0;
-    if (pos) {
-        line = extract_int_value(pos, "line", 0);
-        character = extract_int_value(pos, "character", 0);
-    }
-    
-    LspLocation* location = lsp_get_definition(doc->content, line, character);
+    char* uri = extract_string_value(params, "uri");
+    LspLocation* location = lsp_get_definition(server, uri);
+
     free(uri);
-    
+
     if (!location) {
         return lsp_message_create_response(id, "null");
     }
@@ -345,28 +259,11 @@ LspMessage* lsp_handle_text_document_definition(LspServer* server, const char* i
 }
 
 LspMessage* lsp_handle_text_document_document_symbol(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/documentSymbol received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
-    if (!uri) {
-        return lsp_message_create_response(id, "[]");
-    }
-    
-    LspDocument* doc = lsp_document_store_get(server->documents, uri);
-    if (!doc || !doc->content) {
-        free(uri);
-        return lsp_message_create_response(id, "[]");
-    }
-    
-    LspSymbolList* symbols = lsp_document_symbols(doc->content, uri);
+    char* uri = extract_string_value(params, "uri");
+    LspSymbolInfoList* symbols = lsp_get_document_symbols(uri);
+
     free(uri);
-    
+
     if (!symbols || symbols->count == 0) {
         if (symbols) lsp_symbol_list_destroy(symbols);
         return lsp_message_create_response(id, "[]");
@@ -422,37 +319,11 @@ LspMessage* lsp_handle_text_document_document_symbol(LspServer* server, const ch
 }
 
 LspMessage* lsp_handle_text_document_signature_help(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/signatureHelp received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
-    if (!uri) {
-        return lsp_message_create_response(id, "null");
-    }
-    
-    LspDocument* doc = lsp_document_store_get(server->documents, uri);
-    if (!doc || !doc->content) {
-        free(uri);
-        return lsp_message_create_response(id, "null");
-    }
-    
-    const char* pos = strstr(params, "\"position\":");
-    int line = 0, character = 0;
-    if (pos) {
-        line = extract_int_value(pos, "line", 0);
-        character = extract_int_value(pos, "character", 0);
-    }
-    
-    LSP_LOG_DEBUG("Signature help at %s:%d:%d", uri, line, character);
-    
-    LspSignatureHelp* help = lsp_get_signature_help(doc->content, line, character);
+    char* uri = extract_string_value(params, "uri");
+    LspSignatureHelp* help = lsp_get_signature_help(server, uri);
+
     free(uri);
-    
+
     if (!help) {
         return lsp_message_create_response(id, "null");
     }
@@ -479,28 +350,20 @@ static void parse_format_options(const char* params, LspFormatOptions* options) 
 }
 
 LspMessage* lsp_handle_text_document_formatting(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/formatting received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
+    char* uri = extract_string_value(params, "uri");
     if (!uri) {
         return lsp_message_create_response(id, "null");
     }
-    
-    LspDocument* doc = lsp_document_store_get(server->documents, uri);
-    if (!doc || !doc->content) {
+
+    LspDocument* doc = lsp_server_get_document(server, uri);
+    if (!doc) {
         free(uri);
         return lsp_message_create_response(id, "null");
     }
-    
+
     LspFormatOptions options;
     parse_format_options(params, &options);
-    
+
     char* formatted = lsp_format_document(doc->content, &options);
     free(uri);
     
@@ -521,25 +384,17 @@ LspMessage* lsp_handle_text_document_formatting(LspServer* server, const char* i
 }
 
 LspMessage* lsp_handle_text_document_range_formatting(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/rangeFormatting received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
+    char* uri = extract_string_value(params, "uri");
     if (!uri) {
         return lsp_message_create_response(id, "null");
     }
-    
-    LspDocument* doc = lsp_document_store_get(server->documents, uri);
-    if (!doc || !doc->content) {
+
+    LspDocument* doc = lsp_server_get_document(server, uri);
+    if (!doc) {
         free(uri);
         return lsp_message_create_response(id, "null");
     }
-    
+
     int start_line = 0, start_char = 0, end_line = 0, end_char = 0;
     const char* range = strstr(params, "\"range\":");
     if (range) {
@@ -575,25 +430,17 @@ LspMessage* lsp_handle_text_document_range_formatting(LspServer* server, const c
 }
 
 LspMessage* lsp_handle_text_document_on_type_formatting(LspServer* server, const char* id, const char* params) {
-    if (!server || !params) return NULL;
-    
-    LSP_LOG_DEBUG("textDocument/onTypeFormatting received");
-    
-    const char* text_doc = strstr(params, "\"textDocument\":");
-    if (!text_doc) return NULL;
-    text_doc += 15;
-    
-    char* uri = extract_string_value(text_doc, "uri");
+    char* uri = extract_string_value(params, "uri");
     if (!uri) {
         return lsp_message_create_response(id, "null");
     }
-    
-    LspDocument* doc = lsp_document_store_get(server->documents, uri);
-    if (!doc || !doc->content) {
+
+    LspDocument* doc = lsp_server_get_document(server, uri);
+    if (!doc) {
         free(uri);
         return lsp_message_create_response(id, "null");
     }
-    
+
     int line = 0, character = 0;
     const char* pos = strstr(params, "\"position\":");
     if (pos) {

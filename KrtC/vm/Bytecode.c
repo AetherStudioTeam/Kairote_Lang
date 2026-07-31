@@ -1,5 +1,6 @@
 #include "Bytecode.h"
 #include "Core/Utils/KrtCommon.h"
+#include "../src/Runtime/Runtime.h"
 #include <stdlib.h>
 
 void KrtChunkInit(KrtChunk* chunk) {

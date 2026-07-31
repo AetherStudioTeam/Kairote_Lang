@@ -108,6 +108,30 @@ int function_name(int param)
   - 正确: `KRT_MAX_TOKEN_LENGTH`, `KRT_TOKEN_TYPE_KEYWORD`
   - 错误: `MAX_TOKEN_LENGTH`, `krt_max_token_length`
 
+#### 1.2.4 文件和文件夹命名（PascalCase 强制要求）
+- **文件夹命名**: **强制使用 PascalCase 命名法**，所有单词首字母大写
+  - 正确: `Frontend/`, `Parser/`, `SemanticAnalyzer/`, `CodeGen/`
+  - 错误: `frontend/`, `parser/`, `semantic_analyzer/`, `codegen/`
+  - 错误: `FRONTEND/`, `PARSER/` (全大写)
+- **源文件命名**: **强制使用 PascalCase 命名法**，所有单词首字母大写
+  - 正确: `Parser.c`, `Lexer.c`, `AstNode.c`, `SemanticAnalyzer.c`, `IrGenerator.c`
+  - 错误: `parser.c`, `lexer.c`, `ast_node.c`, `semantic_analyzer.c`, `ir_generator.c`
+- **头文件命名**: **强制使用 PascalCase 命名法**，与对应源文件保持一致
+  - 正确: `Parser.h`, `Lexer.h`, `AstNode.h`, `SemanticAnalyzer.h`
+  - 错误: `parser.h`, `lexer.h`, `ast_node.h`, `semantic_analyzer.h`
+- **特殊文件命名**: 配置文件、文档等也遵循 PascalCase
+  - 正确: `CMakeLists.txt`, `ReadMe.md`, `DevStand.md`, `Version.json`
+  - 错误: `cmakelists.txt`, `readme.md`, `devstand.md`, `version.json`
+- **复合词处理**: 缩略词整体视为一个单词或每个字母都大写
+  - 正确: `XmlParser.c`, `HtmlRenderer.c`, `IoManager.c`, `KrtCompiler.c`
+  - 推荐: `JSONParser.c`, `HTMLRenderer.c`, `IOManager.c`
+- **禁止使用的命名方式**:
+  - ❌ 禁止使用 snake_case (下划线分隔): `my_file.c`
+  - ❌ 禁止使用 kebab-case (连字符分隔): `my-file.c`
+  - ❌ 禁止使用全小写: `myfile.c`
+  - ❌ 禁止使用全大写 (缩略词除外): `MYFILE.C`
+- **迁移计划**: 现有不符合规范的文件应在重构时逐步重命名为 PascalCase
+
 ### 1.3 注释规范
 - **最小化注释**: 代码应该自解释，只在必要时添加注释（如：复杂算法添加注释等）
 - **函数注释**: 只在复杂算法或关键函数前添加简短注释

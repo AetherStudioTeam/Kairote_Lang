@@ -7,8 +7,8 @@ extern void* memset(void* s, int c, size_t n);
 #include <string.h>
 #include "CompilerPipeline.h"
 #include "../../Core/Utils/Logger.h"
-#include "../Frontend/FrontendTemp/FrontendTemp/semantic/Generics.h"
-#include "../Frontend/FrontendTemp/FrontendTemp/semantic/NameMangling.h"
+#include "../Frontend/Semantic/Generics.h"
+#include "../Frontend/Semantic/NameMangling.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -16,8 +16,12 @@ extern void* memset(void* s, int c, size_t n);
 
 #ifdef _WIN32
 #include <windows.h>
+#define KRT_PATH_SEP '\\'
+#define KRT_PATH_SEP_STR "\\"
 #else
 #include <unistd.h>
+#define KRT_PATH_SEP '/'
+#define KRT_PATH_SEP_STR "/"
 #endif
 
 struct TypeCheckContext;
@@ -127,6 +131,8 @@ static int scan_stdlib_directory(const char* dir_path, char** file_list, int max
 static StdlibParseResult load_single_stdlib_file(const char* file_path) {
     StdlibParseResult result = { NULL, NULL };
     
+    printf("[DEBUG PIPELINE] Loading stdlib file: %s\n", file_path);
+    
     FILE* fp = fopen(file_path, "r");
     if (!fp) {
         return result;
@@ -160,8 +166,8 @@ static StdlibParseResult load_single_stdlib_file(const char* file_path) {
     if (!processed_source) {
         return result;
     }
-    
-    printf("[DEBUG] Processed source for %s:\n%s\n[END]\n", file_path, processed_source);
+
+    printf("[DEBUG PIPELINE] Processed source for %s:\n%s\n--- END ---\n", file_path, processed_source);
     
     Lexer* lexer = lexer_create(processed_source);
     if (!lexer) {
@@ -202,26 +208,17 @@ static ASTNode* load_standard_library(const char* stdlib_path) {
     StdlibParseResult* results = (StdlibParseResult*)KRT_CALLOC((size_t)file_count, sizeof(StdlibParseResult));
     if (!results) {
         for (int i = 0; i < file_count; i++) {
-            free(file_list[i]);
+            KRT_FREE(file_list[i]);
         }
         return NULL;
     }
-    
+
     ASTNode* merged_ast = NULL;
     int result_count = 0;
-    
+
     for (int i = 0; i < file_count; i++) {
-        printf("[DEBUG] Loading stdlib file: %s\n", file_list[i]);
         results[result_count] = load_single_stdlib_file(file_list[i]);
-        printf("[DEBUG] File %s: ast=%p\n", file_list[i], (void*)results[result_count].ast);
         if (results[result_count].ast) {
-            if (results[result_count].ast->type == AST_PROGRAM) {
-                printf("[DEBUG] File %s: statement_count=%d\n", file_list[i], results[result_count].ast->data.block.statement_count);
-                for (int j = 0; j < results[result_count].ast->data.block.statement_count && j < 5; j++) {
-                    ASTNode* stmt = results[result_count].ast->data.block.statements[j];
-                    printf("[DEBUG] File %s: stmt[%d] type=%d\n", file_list[i], j, stmt ? (int)stmt->type : -1);
-                }
-            }
             if (!merged_ast) {
                 merged_ast = results[result_count].ast;
             } else {
@@ -231,7 +228,7 @@ static ASTNode* load_standard_library(const char* stdlib_path) {
         } else if (results[result_count].parser) {
             parser_destroy(results[result_count].parser);
         }
-        free(file_list[i]);
+        KRT_FREE(file_list[i]);
     }
     
     // NOTE: We intentionally do NOT destroy parsers whose AST was successfully merged.
@@ -664,7 +661,7 @@ int KrtCompilePipelineExecute(KrtCompilePipeline* pipeline, const char* input_fi
         char exe_dir_truncated[1010];
         strncpy(exe_dir_truncated, exe_dir, sizeof(exe_dir_truncated) - 1);
         exe_dir_truncated[sizeof(exe_dir_truncated) - 1] = '\0';
-        snprintf(stdlib_path, sizeof(stdlib_path), "%s\\..\\stdlib", exe_dir_truncated);
+        snprintf(stdlib_path, sizeof(stdlib_path), "%s" KRT_PATH_SEP_STR ".." KRT_PATH_SEP_STR "stdlib", exe_dir_truncated);
         
         struct stat stdlib_stat;
         if (stat(stdlib_path, &stdlib_stat) == 0 && (stdlib_stat.st_mode & S_IFDIR)) {
@@ -698,7 +695,7 @@ int KrtCompilePipelineGetSuccess(KrtCompilePipeline* pipeline) {
 }
 
 const char* KrtCompilePipelineGetError(KrtCompilePipeline* pipeline) {
-    return pipeline ? pipeline->error_message : "未知错误";
+    return pipeline ? pipeline->error_message : "Unknown error";
 }
 
 KrtCompileStageResult* KrtCompilePipelineGetStageResults(KrtCompilePipeline* pipeline, int* count) {

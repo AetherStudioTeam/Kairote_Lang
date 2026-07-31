@@ -3,13 +3,6 @@
 #include "../../Core/Utils/KrtCommon.h"
 #include "Project.h"
 
-extern char *strncpy(char *dest, const char *src, size_t n);
-extern int strcmp(const char *s1, const char *s2);
-extern char *strstr(const char *haystack, const char *needle);
-extern size_t strlen(const char *s);
-extern char *strchr(const char *s, int c);
-extern char *strrchr(const char *s, int c);
-
 static char* KrtExtractDirectory(const char* path) {
     if (!path) return NULL;
     const char* last_forward = strrchr(path, '/');
@@ -138,7 +131,7 @@ static char* XmlGetElementContent(const char* xml_content, const char* element_n
 
 KrtProject* KrtProjLoad(const char* proj_file) {
     if (!proj_file || proj_file[0] == '\0') {
-        KrtError("项目文件路径不能为空");
+        KrtError("Project file path cannot be empty");
         return NULL;
     }
 

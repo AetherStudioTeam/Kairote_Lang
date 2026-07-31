@@ -120,9 +120,18 @@ static void emit_call_external(KROCodegenContext* ctx, const char* func_name) {
         if (strcmp(func_name, "Console__Write") == 0 ||
             strcmp(func_name, "Console__WriteLine") == 0) {
             
+#ifdef _WIN32
             sym_idx = kro_add_import_symbol(ctx->writer, "WriteConsoleA", "kernel32.dll");
+#else
+            sym_idx = kro_add_undefined_symbol(ctx->writer, "Console__Write");
+#endif
         } else if (strcmp(func_name, "Console__ReadLine") == 0) {
+            
+#ifdef _WIN32
             sym_idx = kro_add_import_symbol(ctx->writer, "ReadConsoleA", "kernel32.dll");
+#else
+            sym_idx = kro_add_undefined_symbol(ctx->writer, "Console__ReadLine");
+#endif
         } else {
             
             sym_idx = kro_add_undefined_symbol(ctx->writer, func_name);
@@ -389,7 +398,7 @@ static void KroGenerateFunction(KROCodegenContext* ctx, KrtIRFunction* func, Krt
     (void)kro_get_code_offset(ctx->writer);
 
     int is_main = (strcmp(func->name, "main") == 0);
-    int is_mangled_main = (strcmp(func->name, "_ZN4mainEv") == 0);
+    int is_mangled_main = (strcmp(func->name, "_KrtMainEntry") == 0);
     int is_entry_point = is_main || is_mangled_main;
 
     int stack_size = calculate_function_stack_size(func);
@@ -418,9 +427,9 @@ static void KroGenerateFunction(KROCodegenContext* ctx, KrtIRFunction* func, Krt
             
             KrtIRFunction* mangled_main = module->functions;
             while (mangled_main) {
-                if (strcmp(mangled_main->name, "_ZN4mainEv") == 0) {
+                if (strcmp(mangled_main->name, "_KrtMainEntry") == 0) {
                     
-                    emit_call_local(ctx, "_ZN4mainEv");
+                    emit_call_local(ctx, "_KrtMainEntry");
                     called_mangled_main = 1;
                     break;
                 }
@@ -445,7 +454,7 @@ static void KroGenerateDataSection(KROCodegenContext* ctx, KrtIRModule* module) 
     if (!module) return;
 
     if (module->string_const_count > 0 && module->string_constants) {
-        ctx->string_const_sym_indices = (int32_t*)malloc(module->string_const_count * sizeof(int32_t));
+        ctx->string_const_sym_indices = (int32_t*)KRT_MALLOC(module->string_const_count * sizeof(int32_t));
         for (int i = 0; i < module->string_const_count; i++) {
             const char* str = module->string_constants[i];
             if (!str) continue;
@@ -523,7 +532,7 @@ void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule*
         sym_indices[func_idx] = sym_idx;
 
         int is_main = (strcmp(func->name, "main") == 0);
-        int is_mangled_main = (strcmp(func->name, "_ZN4mainEv") == 0);
+        int is_mangled_main = (strcmp(func->name, "_KrtMainEntry") == 0);
         if (is_main || is_mangled_main) {
             kro_set_entry_point(ctx.writer, func_offset);
         }
@@ -536,8 +545,8 @@ void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule*
 
 #ifdef __linux__
     /* Generate a tiny _start stub for ELF executables.
-     * _start -> call _ZN4mainEv -> mov edi,eax -> mov eax,60 -> syscall */
-    int main_sym_idx = kro_find_symbol(ctx.writer, "_ZN4mainEv");
+     * _start -> call _KrtMainEntry -> mov edi,eax -> mov eax,60 -> syscall */
+    int main_sym_idx = kro_find_symbol(ctx.writer, "_KrtMainEntry");
     if (main_sym_idx < 0) {
         main_sym_idx = kro_find_symbol(ctx.writer, "main");
     }
@@ -545,7 +554,7 @@ void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule*
         uint32_t start_offset = kro_get_code_offset(ctx.writer);
         kro_add_symbol(ctx.writer, "_start", KRO_SYM_FUNC, KRO_BIND_GLOBAL, KRO_SEC_TEXT, start_offset);
 
-        /* call _ZN4mainEv (rel32, patched by PC32 reloc) */
+        /* call _KrtMainEntry (rel32, patched by PC32 reloc) */
         emit_byte(&ctx, 0xE8);
         uint32_t call_reloc_offset = kro_get_code_offset(ctx.writer);
         emit_u32(&ctx, 0);
@@ -570,7 +579,7 @@ void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule*
         kro_update_symbol_value(ctx.writer, sym_indices[func_idx], actual_offset);
 
         int is_main = (strcmp(func->name, "main") == 0);
-        int is_mangled_main = (strcmp(func->name, "_ZN4mainEv") == 0);
+        int is_mangled_main = (strcmp(func->name, "_KrtMainEntry") == 0);
 #ifndef __linux__
         if (is_main || is_mangled_main) {
             kro_set_entry_point(ctx.writer, actual_offset);
@@ -588,7 +597,7 @@ void KrtKrtGenerate(FILE* output_file, const char* output_filename, KrtIRModule*
     }
 
     if (ctx.string_const_sym_indices) {
-        free(ctx.string_const_sym_indices);
+        KRT_FREE(ctx.string_const_sym_indices);
     }
     kro_writer_destroy(ctx.writer);
 }

@@ -1,4 +1,5 @@
 #include "ArkLink/loader.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -140,7 +141,19 @@ ArkLinkResult ark_loader_load_unit(ArkLinkContext* ctx, const char* path, const 
     if (strcmp(ext, ".kro") == 0) {
         result = ark_link_load_kro(path, &unit);
     } else if (strcmp(ext, ".obj") == 0 || strcmp(ext, ".o") == 0) {
-        result = ark_link_load_coff(path, &unit);
+        FILE* magic_file = fopen(path, "rb");
+        if (magic_file) {
+            unsigned char magic[4] = {0};
+            fread(magic, 1, 4, magic_file);
+            fclose(magic_file);
+            if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F') {
+                result = ark_link_load_elf(path, &unit);
+            } else {
+                result = ark_link_load_coff(path, &unit);
+            }
+        } else {
+            result = ARK_LINK_ERR_NOT_FOUND;
+        }
     } else {
         if (diag) {
             diag->code = ARK_LINK_ERR_UNSUPPORTED;
