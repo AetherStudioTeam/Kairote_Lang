@@ -1,0 +1,222 @@
+namespace System.Runtime;
+
+// ============================================
+// StringBuilder — 可变字符串构建器
+// 纯 .krt 实现
+//
+// 当前状态: 实现完成, 但受限于编译器跨文件调用限制,
+// 需要在同一文件中包含所有依赖函数。
+// ============================================
+
+public static class StringBuilder
+{
+    // 分配缓冲区
+    // 使用 syscall(mmap) 直接分配内存
+    public static int64 AllocateBuffer(int32 capacity)
+    {
+        // mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+        return Sys.syscall(9, 0, (int64)(capacity + 1), 3, 0x22, -1, 0);
+    }
+
+    // 释放缓冲区
+    public static void FreeBuffer(int64 buffer, int32 capacity)
+    {
+        Sys.syscall(11, buffer, (int64)(capacity + 1), 0, 0, 0, 0);
+    }
+
+    // 追加字符串到缓冲区
+    // 参数: buffer, bufferSize, currentLength, value
+    // 返回: 新长度, 如果容量不足返回 -1
+    public static int32 AppendString(int64 buffer, int32 bufferSize, int32 currentLength, string value)
+    {
+        if (value == null) return currentLength;
+
+        int32 valueLen = (int32)Sys.InternalStringLength(value);
+        if (valueLen == 0) return currentLength;
+
+        if (currentLength + valueLen > bufferSize) return -1;
+
+        int64 valuePtr = Sys.InternalStringPtr(value);
+        char[] src = (char[])valuePtr;
+        char[] dst = (char[])buffer;
+
+        int32 i = 0;
+        while (i < valueLen)
+        {
+            dst[currentLength + i] = src[i];
+            i = i + 1;
+        }
+
+        return currentLength + valueLen;
+    }
+
+    // 追加字符到缓冲区
+    public static int32 AppendChar(int64 buffer, int32 bufferSize, int32 currentLength, char value)
+    {
+        if (currentLength + 1 > bufferSize) return -1;
+
+        char[] dst = (char[])buffer;
+        dst[currentLength] = value;
+        return currentLength + 1;
+    }
+
+    // 追加 int32 到缓冲区
+    public static int32 AppendInt32(int64 buffer, int32 bufferSize, int32 currentLength, int32 value)
+    {
+        string s = Sys.InternalInt32ToString(value);
+        return AppendString(buffer, bufferSize, currentLength, s);
+    }
+
+    // 追加 bool 到缓冲区
+    public static int32 AppendBool(int64 buffer, int32 bufferSize, int32 currentLength, bool value)
+    {
+        if (value)
+        {
+            return AppendString(buffer, bufferSize, currentLength, "True");
+        }
+        else
+        {
+            return AppendString(buffer, bufferSize, currentLength, "False");
+        }
+    }
+
+    // 追加一行（字符串 + 换行）
+    public static int32 AppendLine(int64 buffer, int32 bufferSize, int32 currentLength, string value)
+    {
+        int32 len = AppendString(buffer, bufferSize, currentLength, value);
+        if (len < 0) return -1;
+        return AppendChar(buffer, bufferSize, len, '\n');
+    }
+
+    // 追加空行
+    public static int32 AppendLine(int64 buffer, int32 bufferSize, int32 currentLength)
+    {
+        return AppendChar(buffer, bufferSize, currentLength, '\n');
+    }
+
+    // 插入字符串
+    public static int32 Insert(int64 buffer, int32 bufferSize, int32 currentLength, int32 index, string value)
+    {
+        if (value == null) return currentLength;
+        if (index < 0) index = 0;
+        if (index > currentLength) index = currentLength;
+
+        int32 valueLen = (int32)Sys.InternalStringLength(value);
+        if (valueLen == 0) return currentLength;
+
+        if (currentLength + valueLen > bufferSize) return -1;
+
+        // 向后移动现有字符
+        char[] buf = (char[])buffer;
+        int32 i = currentLength - 1;
+        while (i >= index)
+        {
+            buf[i + valueLen] = buf[i];
+            i = i - 1;
+        }
+
+        // 插入新字符
+        int64 valuePtr = Sys.InternalStringPtr(value);
+        char[] src = (char[])valuePtr;
+        i = 0;
+        while (i < valueLen)
+        {
+            buf[index + i] = src[i];
+            i = i + 1;
+        }
+
+        return currentLength + valueLen;
+    }
+
+    // 移除指定范围的字符
+    public static int32 Remove(int64 buffer, int32 currentLength, int32 index, int32 length)
+    {
+        if (index < 0 || index >= currentLength || length <= 0) return currentLength;
+
+        if (index + length > currentLength)
+        {
+            length = currentLength - index;
+        }
+
+        char[] buf = (char[])buffer;
+        int32 i = index + length;
+        while (i < currentLength)
+        {
+            buf[i - length] = buf[i];
+            i = i + 1;
+        }
+
+        return currentLength - length;
+    }
+
+    // 清空缓冲区（重置长度）
+    public static int32 Clear(int32 currentLength)
+    {
+        return 0;
+    }
+
+    // 从缓冲区创建字符串
+    public static string BufferToString(int64 buffer, int32 length)
+    {
+        if (length == 0) return "";
+
+        // 分配新缓冲区
+        int64 newBuf = Sys.syscall(9, 0, (int64)(length + 1), 3, 0x22, -1, 0);
+        char[] src = (char[])buffer;
+        char[] dst = (char[])newBuf;
+
+        int32 i = 0;
+        while (i < length)
+        {
+            dst[i] = src[i];
+            i = i + 1;
+        }
+        dst[length] = '\0';
+
+        return (string)newBuf;
+    }
+
+    // 查找字符首次出现的位置
+    public static int32 IndexOf(int64 buffer, int32 length, char c)
+    {
+        char[] buf = (char[])buffer;
+        int32 i = 0;
+        while (i < length)
+        {
+            if (buf[i] == c) return i;
+            i = i + 1;
+        }
+        return -1;
+    }
+
+    // 查找字符最后一次出现的位置
+    public static int32 LastIndexOf(int64 buffer, int32 length, char c)
+    {
+        char[] buf = (char[])buffer;
+        int32 i = length - 1;
+        while (i >= 0)
+        {
+            if (buf[i] == c) return i;
+            i = i - 1;
+        }
+        return -1;
+    }
+
+    // 替换字符
+    public static int32 Replace(int64 buffer, int32 length, char oldChar, char newChar)
+    {
+        char[] buf = (char[])buffer;
+        int32 count = 0;
+        int32 i = 0;
+        while (i < length)
+        {
+            if (buf[i] == oldChar)
+            {
+                buf[i] = newChar;
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        return count;
+    }
+}

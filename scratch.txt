@@ -1,0 +1,125 @@
+已完整审查两个后端的所有文件。以下是特殊处理的语句/代码汇总：
+
+---
+
+## X86 ASM 后端 (`Re.KrtC/src/compiler/Backend/X86/`)
+
+### 1. 除零检查 (`X86Codegen.c:354-366`)
+DIV/MOD 操作会生成运行时除零检测：
+```c
+fprintf(em->output, "    test r8, r8\n");
+fprintf(em->output, "    jz .Ldiv_by_zero_%s\n", ...);
+```
+并在函数末尾生成错误处理标签（`.Ldiv_by_zero_%s`），返回 `-1`。
+
+### 2. main 函数特殊返回 (`X86Codegen.c:497-513`)
+`main` 函数不走正常 `ret`，而是生成 Linux `sys_exit` syscall：
+```c
+fprintf(em->output, "    mov rax, 60\n");
+fprintf(em->output, "    syscall\n");
+```
+
+### 3. print 函数名映射 (`X86Codegen.c:481-485`)
+`print_string` → `_print_string`，`println_string` → `_println_string`
+
+### 4. 字符串常量加载 (`X86Codegen.c:320-323`)
+使用 `lea` + 相对地址（RIP-relative）：
+```c
+fprintf(em->output, "    lea %s, [rel string_const_%d]\n", target_reg, str_id);
+```
+
+### 5. Syscall IR 指令支持 (`X86Codegen.c` 中处理 `KRT_IR_SYSCALL`)
+将参数放入对应寄存器后生成 `syscall` 指令。
+
+### 6. 数组存储 (`X86Codegen.c:521-535`)
+使用比例变址寻址：`mov [rcx + rdx*8], rax`
+
+### 7. 指针操作 (`X86Codegen.c:629-649`)
+`KRT_IR_LOADPTR` / `KRT_IR_STOREPTR` 支持带偏移的指针解引用。
+
+### 8. 类型转换走外部函数
+- `KRT_IR_INT_TO_STRING` → `call KrtIntToString`
+- `KRT_IR_DOUBLE_TO_STRING` → `call KrtDoubleToString`
+- `KRT_IR_STRCAT` → `call KrtStringConcat`
+- `KRT_IR_POW` → `call KrtPow`
+
+### 9. ABI 跨平台差异
+- **Linux**: 参数寄存器 `rdi, rsi, rdx, rcx, r8, r9`（6个）
+- **Windows**: 参数寄存器 `rcx, rdx, r8, r9`（4个）+ shadow space 32 字节
+
+### 10. Peephole 优化 (`X86CodeOpt.c`)
+| 模式 | 匹配 | 替换 |
+|------|------|------|
+| 冗余 MOV 消除 | `COPY(t,x); COPY(t2,t)` | 直接复制源 |
+| 冗余 LOAD/STORE | `STORE(var,val); LOAD(var)` | `COPY(val)` |
+| 代数恒等式 | `ADD(x,0)`, `MUL(x,1)` | `COPY(x)` |
+| 零结果 | `MUL(x,0)`, `SUB(x,x)` | `COPY(0)` |
+| 取负模式 | `MUL(x,-1)` | `SUB(0,x)` |
+| 强度折减 | `MUL(x,2/4/8/...)` | `LSHIFT(x,n)` |
+
+### 11. 图着色寄存器分配 (`X86RegAlloc.c`)
+- 14 个可分配寄存器（9 caller-saved + 5 callee-saved）
+- 基于活跃变量分析的冲突图构建
+- 溢出代价计算（度数 × 2 + 使用次数 × 5）
+- 优先分配 caller-saved 寄存器，溢出到栈
+
+---
+
+## Kro 目标文件后端
+
+### Kro 格式写入 (`KroWriter.c`)
+| 特殊处理 | 说明 |
+|----------|------|
+| 文件格式 | Magic `0x4F524B41` ("AKRO")，版本 1 |
+| 段类型 | text/data/rodata/bss 四段，各自独立缓冲区 |
+| 符号导入 | `kro_add_import_symbol` 额外存储 module 名字符串（如 `libc.so.6`） |
+| 重定位类型 | `ABS64` / `ADDR32` / `PC32` 三种 |
+| 对齐填充 | text 用 NOP(0x90)，data 用零填充 |
+
+### Kro Codegen (`KroCodegen.c`)
+
+**已处理的 IR opcode：**
+
+| Opcode | 处理方式 |
+|--------|----------|
+| `KRT_IR_IMM` | `mov rax, imm64` (REX.W + B8+r) |
+| `KRT_IR_ADD/SUB/MUL/DIV` | 二进制操作，结果存栈临时槽 |
+| `KRT_IR_CALL` | 区分本地/外部调用，加对应重定位 |
+| `KRT_IR_RETURN` | 加载返回值到 rax |
+| `KRT_IR_STORE` | 存到局部变量或全局符号（带重定位） |
+| `KRT_IR_LOAD` | 从局部变量或全局符号加载 |
+| `KRT_IR_ALLOC` | 分配局部变量栈槽 |
+| `KRT_IR_COPY` | 复制值到 temp/var |
+| `KRT_IR_PHI` | 仅分配栈槽（无实际合并代码） |
+| `KRT_IR_SYSCALL` | 完整参数传递 + `syscall` 指令 |
+
+**特殊处理：**
+1. **入口点函数检测** (`KroCodegen.c:53-56`): `main` / `_KrtMainEntry`
+2. **入口点 epilogue 差异**: main 调用 `syscall(60)` 或 `ExitProcess`，而非 `ret`
+3. **字符串常量重定位**: `emit_load_string_addr_to_reg` 添加 `ABS64` 重定位
+4. **外部函数名字映射** (Linux→`libc.so.6`, Windows→`msvcrt.dll`): `puts`, `printf`, `fgets`, `malloc`, `free`, `memcpy`, `ExitProcess`
+
+### Kro Loader (`ArkLink/src/LoaderKro.c`)
+
+| 处理 | 说明 |
+|------|------|
+| Section 映射 | KRO 段索引 → ArkLink 段索引转换（1-based → 0-based） |
+| 符号类型推断 | `.text` 中的符号自动标记为 `ARK_SYM_FUNC`，其余 `ARK_SYM_OBJECT` |
+| 导入模块恢复 | 从字符串表读取 `import_module_offset` 指向的 DLL/SO 名 |
+| 重定位应用 | 按段分类添加到对应 section |
+
+---
+
+## 两个后端对比总结
+
+| 特性 | X86 ASM 后端 | Kro 后端 |
+|------|-------------|----------|
+| 输出格式 | 文本 (.asm) | 二进制 (.kro) |
+| 寄存器分配 | 图着色 + 溢出 | 全栈分配（无寄存器分配） |
+| 优化 | Peephole 多模式 | 无 |
+| 函数调用 | 直接 call + 外部声明 | 本地/外部区分 + 重定位 |
+| 字符串常量 | `[rel string_const_N]` | rodata + ABS64 重定位 |
+| 除零检查 | 有（条件跳转） | 无 |
+| Syscall | 有 | 有 |
+| PHI | N/A (SSA已在IR层处理) | 仅分配栈槽 |
+| 浮点 | 无（仅有 `KrtDoubleToString` 调用） | 无 |

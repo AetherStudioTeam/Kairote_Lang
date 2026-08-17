@@ -1,0 +1,116 @@
+============================================================
+  修复评审 — 有问题的 / 非最优的修复
+============================================================
+
+============================================================
+【严重】Kro 比较运算 SETCC 编码错误 — 结果丢失
+============================================================
+
+位置: KroCodegen.c:517-532
+
+当前代码:
+    emit_bytes(ctx, (const uint8_t*)"\x48\x39\xD8", 3);      // cmp rax, rbx
+    emit_bytes(ctx, (const uint8_t*)"\x0F", 1);
+    emit_byte(ctx, setcc_byte);
+    emit_bytes(ctx, (const uint8_t*)"\x0C\x04\x24", 3);      // setcc byte [rsp+4] — 存到栈
+    emit_bytes(ctx, (const uint8_t*)"\x48\x0F\xB6\xC0", 4);  // movzx rax, al — 读的是 al 而非栈
+
+问题:
+  setcc byte [rsp+4] 把比较结果存入栈内存 [rsp+4]，
+  但下一句 movzx rax, al 读取的是 al 寄存器（此时 al 中是 cmp 后的垃圾值），
+  而非从 [rsp+4] 加载。导致比较结果丢失，rax 永远为垃圾值。
+
+修复方案 (推荐，与 X86 后端一致):
+    emit_byte(ctx, 0x0F);
+    emit_byte(ctx, setcc_byte);
+    emit_byte(ctx, 0xC0);                                     // setcc al (ModR/M: 11 000 000)
+    emit_bytes(ctx, (const uint8_t*)"\x48\x0F\xB6\xC0", 4);  // movzx rax, al
+
+  或者如果要存栈再加载:
+    emit_bytes(ctx, (const uint8_t*)"\x0F", 1);
+    emit_byte(ctx, setcc_byte);
+    emit_bytes(ctx, (const uint8_t*)"\x0C\x04\x24", 3);        // setcc byte [rsp+4]
+    emit_bytes(ctx, (const uint8_t*)"\x48\x0F\xB6\x44\x24\x04", 5);  // movzx rax, byte [rsp+4]
+
+============================================================
+【严重】Kro STOREPTR 操作数顺序与 X86 后端不一致
+============================================================
+
+位置: KroCodegen.c:660-683
+
+当前代码 (修复后):
+    KrtIRValue* base  = &inst->operands[0];
+    KrtIRValue* value = &inst->operands[1];
+    // offset 从 operands[2] 读取
+
+X86 后端原始代码:
+    KrtIRValue* base  = &inst->operands[0];
+    int offset = (int)inst->operands[1].data.imm;
+    KrtIRValue* value = &inst->operands[2];  (如果 operand_count >= 3)
+
+问题:
+  两个后端对 STOREPTR 的操作数布局假设不同。
+  Kro: [base, value, offset]
+  X86: [base, offset, value]
+  这要求 IR 生成器针对不同后端生成不同顺序，否则 offset 和 value 会互换。
+
+修复方案:
+  统一为 [base, offset, value] 顺序 (与 X86 后端一致):
+    KrtIRValue* base  = &inst->operands[0];
+    int offset = (int)inst->operands[1].data.imm;
+    KrtIRValue* value = &inst->operands[2];  (如果 operand_count >= 3)
+
+  或者确认 IR 生成器对 Kro 后端使用 [base, value, offset] 顺序，
+  并在代码注释中明确标注这一差异。
+
+============================================================
+【高】Kro CALL 返回值未保存
+============================================================
+
+位置: KroCodegen.c:802-851
+
+当前代码:
+    if (local_sym_idx >= 0) {
+        emit_call_local(ctx, func_name);
+    } else {
+        emit_call_external(ctx, func_name);
+    }
+    // 缺少返回值保存
+
+问题:
+   函数调用后 rax 中包含返回值，但没有存入 result 对应的 temp slot。
+   后续使用该返回值的代码会读到未初始化的栈槽。
+
+修复方案:
+  在 emit_call_local / emit_call_external 之后添加:
+    if (result && result->type == KRT_IR_VALUE_TEMP) {
+        int slot = alloc_temp_slot(ctx, result->data.index);
+        if (slot > 0) {
+            emit_store_to_stack(ctx, slot, REG_RAX);
+        }
+    }
+
+============================================================
+【中】X86 后端 RCX 永久保留 — 非最优
+============================================================
+
+位置: X86Codegen.c:110
+
+当前代码:
+    ctx->registers[0].is_free = 0;  // RAX 保留
+    ctx->registers[2].is_free = 0;  // RCX 保留 (新增)
+
+分析:
+  RCX 只在 KRT_IR_LSHIFT / KRT_IR_RSHIFT 中作为 cl 使用 (shl rax / sar rax, cl)。
+  永久保留 RCX 会减少可用寄存器数量，增加溢出概率。
+  但这是保守且正确的做法——确保 emit 函数中硬编码的 rcx 不会被分配器占用。
+
+可选优化:
+  不在初始化时永久保留，而是在 emit_shift 中标记为临时使用:
+    - 在 emit_load_value 加载 shift amount 到 rcx 前，确保 rcx 不被占用
+    - 如果 rcx 已被分配给某个 temp，先将该 temp 溢出到栈
+  这样 rcx 可作为通用寄存器使用，仅在 shift 指令序列中临时借用。
+
+  但考虑到复杂度和正确性，当前方案可接受。
+
+============================================================

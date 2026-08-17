@@ -1,0 +1,24 @@
+// Sys.krt - 系统调用和内建函数封装
+
+public static class Sys
+{
+    public const int64 SYS_read = 0;
+    public const int64 SYS_write = 1;
+    public const int64 SYS_open = 2;
+    public const int64 SYS_close = 3;
+    public const int64 SYS_mmap = 9;
+    public const int64 SYS_munmap = 11;
+    public const int64 SYS_brk = 12;
+    public const int64 SYS_exit = 60;
+
+    // 内建函数声明 (编译器识别并生成相应指令)
+    public static extern int64 syscall(int64 number, int64 arg1, int64 arg2, int64 arg3, int64 arg4, int64 arg5, int64 arg6);
+    public static extern int64 InternalStringPtr(string s);
+    public static extern int64 InternalStringLength(string s);
+    public static extern string InternalInt32ToString(int32 value);
+
+    public static void Exit(int32 code)
+    {
+        syscall(SYS_exit, (int64)code, 0, 0, 0, 0, 0);
+    }
+}

@@ -1,0 +1,90 @@
+namespace System.Runtime;
+
+// ============================================
+// Convert — 类型转换
+// 纯 .krt 实现
+// ============================================
+
+public static class Convert
+{
+    // 字符串转 int32
+    public static int32 ToInt32(string s)
+    {
+        if (s == null) return 0;
+
+        int32 len = StringOps.Length(s);
+        int64 ptr = Sys.InternalStringPtr(s);
+        char[] arr = (char[])ptr;
+
+        int32 result = 0;
+        int32 i = 0;
+        int32 negative = 0;
+
+        if (len > 0 && arr[0] == '-')
+        {
+            negative = 1;
+            i = 1;
+        }
+
+        while (i < len)
+        {
+            char c = arr[i];
+            if (c < '0' || c > '9') break;
+            result = result * 10 + ((int32)c - (int32)'0');
+            i = i + 1;
+        }
+
+        if (negative == 1) result = -result;
+        return result;
+    }
+
+    // 字符串转 int64
+    public static int64 ToInt64(string s)
+    {
+        if (s == null) return 0;
+
+        int32 len = StringOps.Length(s);
+        int64 ptr = Sys.InternalStringPtr(s);
+        char[] arr = (char[])ptr;
+
+        int64 result = 0;
+        int32 i = 0;
+        int32 negative = 0;
+
+        if (len > 0 && arr[0] == '-')
+        {
+            negative = 1;
+            i = 1;
+        }
+
+        while (i < len)
+        {
+            char c = arr[i];
+            if (c < '0' || c > '9') break;
+            result = result * 10 + ((int64)c - (int64)'0');
+            i = i + 1;
+        }
+
+        if (negative == 1) result = -result;
+        return result;
+    }
+
+    // int32 转 string
+    public static string ToString(int32 value)
+    {
+        return StringOps.FromInt32(value);
+    }
+
+    // int64 转 string
+    public static string ToString(int64 value)
+    {
+        return StringOps.FromInt64(value);
+    }
+
+    // bool 转 string
+    public static string ToString(bool value)
+    {
+        if (value) return "True";
+        return "False";
+    }
+}

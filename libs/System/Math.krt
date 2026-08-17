@@ -1,0 +1,126 @@
+namespace System.Runtime;
+
+// ============================================
+// Math — 数学函数
+// 纯 .krt 实现, 不依赖 C 运行时库
+// ============================================
+
+public static class MathOps
+{
+    // 绝对值 (int32)
+    public static int32 Abs(int32 value)
+    {
+        if (value < 0) return -value;
+        return value;
+    }
+
+    // 绝对值 (int64)
+    public static int64 Abs(int64 value)
+    {
+        if (value < 0) return -value;
+        return value;
+    }
+
+    // 最大值 (int32)
+    public static int32 Max(int32 a, int32 b)
+    {
+        return a > b ? a : b;
+    }
+
+    // 最小值 (int32)
+    public static int32 Min(int32 a, int32 b)
+    {
+        return a < b ? a : b;
+    }
+
+    // 最大值 (int64)
+    public static int64 Max(int64 a, int64 b)
+    {
+        return a > b ? a : b;
+    }
+
+    // 最小值 (int64)
+    public static int64 Min(int64 a, int64 b)
+    {
+        return a < b ? a : b;
+    }
+
+    // 限制值在范围内
+    public static int32 Clamp(int32 value, int32 min, int32 max)
+    {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+
+    // 整数幂运算
+    public static int32 Pow(int32 baseVal, int32 exp)
+    {
+        if (exp <= 0) return 1;
+        int32 result = 1;
+        int32 i = 0;
+        while (i < exp)
+        {
+            result = result * baseVal;
+            i = i + 1;
+        }
+        return result;
+    }
+
+    // 整数平方根 (牛顿法)
+    public static int32 Sqrt(int32 value)
+    {
+        if (value <= 0) return 0;
+        if (value == 1) return 1;
+
+        int32 x = value;
+        int32 y = (x + 1) / 2;
+
+        while (y < x)
+        {
+            x = y;
+            y = (x + value / x) / 2;
+        }
+
+        return x;
+    }
+
+    // 判断是否为质数
+    public static bool IsPrime(int32 n)
+    {
+        if (n < 2) return false;
+        if (n == 2) return true;
+        if (n % 2 == 0) return false;
+
+        int32 i = 3;
+        int32 limit = Sqrt(n);
+        while (i <= limit)
+        {
+            if (n % i == 0) return false;
+            i = i + 2;
+        }
+
+        return true;
+    }
+
+    // 最大公约数 (欧几里得算法)
+    public static int32 GCD(int32 a, int32 b)
+    {
+        a = Abs(a);
+        b = Abs(b);
+        while (b != 0)
+        {
+            int32 temp = b;
+            b = a % b;
+            a = temp;
+        }
+        return a;
+    }
+
+    // 最小公倍数
+    public static int32 LCM(int32 a, int32 b)
+    {
+        if (a == 0 || b == 0) return 0;
+        return Abs(a / GCD(a, b) * b);
+    }
+}
