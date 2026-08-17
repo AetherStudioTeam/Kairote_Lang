@@ -38,6 +38,43 @@ static void KrtIrPushNamespaceContext(KrtIRBuilder* builder, const char* namespa
 static void KrtIrPopNamespaceContext(KrtIRBuilder* builder);
 static const char** KrtIrGetNamespacePath(KrtIRBuilder* builder, int* out_count);
 
+static int irgen_type_size(TypeKind kind) {
+    switch (kind) {
+        case TYPE_INT8:
+        case TYPE_UINT8:
+        case TYPE_BOOL:
+            return 1;
+        case TYPE_INT16:
+        case TYPE_UINT16:
+            return 2;
+        case TYPE_INT32:
+        case TYPE_UINT32:
+        case TYPE_FLOAT32:
+            return 4;
+        default:
+            return 8;
+    }
+}
+
+static int irgen_array_element_size(KrtIRBuilder* builder, ASTNode* array_expr) {
+    if (!builder || !builder->type_context || !array_expr) return 8;
+
+    Type* array_type = type_check_expression(builder->type_context, array_expr);
+    if (!array_type) return 8;
+
+    int size = 8;
+    if (array_type->kind == TYPE_ARRAY && array_type->data.array.element_type) {
+        size = irgen_type_size(array_type->data.array.element_type->kind);
+    }
+    type_destroy(array_type);
+    return size;
+}
+
+static int irgen_is_syscall_method(const char* class_name, const char* method_name) {
+    return class_name && method_name &&
+           strcmp(class_name, "Sys") == 0 && strcmp(method_name, "syscall") == 0;
+}
+
 typedef struct {
     char** type_args;
     int type_arg_count;
@@ -173,11 +210,81 @@ static KrtIRValue irgen_call_builtin_4args(KrtIRBuilder* builder, IrGenBuiltinFu
 }
 
 static KrtIRValue irgen_allocate_memory(KrtIRBuilder* builder, KrtIRValue size_val) {
-    return irgen_call_builtin_1arg(builder, IRGEN_FUNC_MALLOC, size_val);
+    const int header_size = IRGEN_POINTER_SIZE;
+    char result_name[64];
+    char success_label[64];
+    char failure_label[64];
+    char end_label[64];
+    int label_id = builder->label_counter++;
+    snprintf(result_name, sizeof(result_name), "__krt_malloc_result_%d", label_id);
+    snprintf(success_label, sizeof(success_label), "malloc_success_%d", label_id);
+    snprintf(failure_label, sizeof(failure_label), "malloc_failure_%d", label_id);
+    snprintf(end_label, sizeof(end_label), "malloc_end_%d", label_id);
+
+    KrtIrAlloc(builder, result_name);
+    KrtIrStore(builder, result_name, KrtIrImm(builder, 0));
+
+    KrtIRValue total_size = KrtIrAdd(builder, size_val, KrtIrImm(builder, header_size));
+    KrtIRValue mmap_args[6] = {
+        KrtIrImm(builder, 0),
+        total_size,
+        KrtIrImm(builder, 3),
+        KrtIrImm(builder, 0x22),
+        KrtIrImm(builder, -1),
+        KrtIrImm(builder, 0)
+    };
+    KrtIRValue allocation = KrtIrSyscall(builder, KrtIrImm(builder, 9), mmap_args, 6);
+
+    KrtIRBasicBlock* source_block = builder->current_block;
+    KrtIRBasicBlock* success_block = KrtIrBlockCreate(builder, success_label);
+    KrtIRBasicBlock* failure_block = KrtIrBlockCreate(builder, failure_label);
+    KrtIRBasicBlock* end_block = KrtIrBlockCreate(builder, end_label);
+    KrtIrBranch(builder,
+                KrtIrCompare(builder, KRT_IR_LT, allocation, KrtIrImm(builder, 0)),
+                failure_block, success_block);
+    if (source_block) source_block->next = failure_block;
+    failure_block->next = success_block;
+    success_block->next = end_block;
+
+    KrtIrBlockSetCurrent(builder, failure_block);
+    KrtIrJump(builder, end_block);
+
+    KrtIrBlockSetCurrent(builder, success_block);
+    KrtIrStorePtr(builder, allocation, 0, total_size);
+    KrtIrStore(builder, result_name,
+               KrtIrAdd(builder, allocation, KrtIrImm(builder, header_size)));
+    KrtIrJump(builder, end_block);
+
+    KrtIrBlockSetCurrent(builder, end_block);
+    return KrtIrLoad(builder, result_name);
 }
 
 static void irgen_free_memory(KrtIRBuilder* builder, KrtIRValue ptr_val) {
-    irgen_call_builtin_1arg(builder, IRGEN_FUNC_FREE, ptr_val);
+    const int header_size = IRGEN_POINTER_SIZE;
+
+    char free_label[64];
+    char end_label[64];
+    int label_id = builder->label_counter++;
+    snprintf(free_label, sizeof(free_label), "free_release_%d", label_id);
+    snprintf(end_label, sizeof(end_label), "free_end_%d", label_id);
+
+    KrtIRBasicBlock* source_block = builder->current_block;
+    KrtIRBasicBlock* free_block = KrtIrBlockCreate(builder, free_label);
+    KrtIRBasicBlock* end_block = KrtIrBlockCreate(builder, end_label);
+    KrtIrBranch(builder,
+                KrtIrCompare(builder, KRT_IR_EQ, ptr_val, KrtIrImm(builder, 0)),
+                end_block, free_block);
+    if (source_block) source_block->next = free_block;
+    free_block->next = end_block;
+
+    KrtIrBlockSetCurrent(builder, free_block);
+    KrtIRValue allocation = KrtIrSub(builder, ptr_val, KrtIrImm(builder, header_size));
+    KrtIRValue total_size = KrtIrLoadPtr(builder, allocation, 0);
+    KrtIRValue munmap_args[2] = { allocation, total_size };
+    KrtIrSyscall(builder, KrtIrImm(builder, 11), munmap_args, 2);
+    KrtIrJump(builder, end_block);
+
+    KrtIrBlockSetCurrent(builder, end_block);
 }
 
 static KrtIRValue irgen_store_pointer(KrtIRBuilder* builder, KrtIRValue ptr, 
@@ -301,31 +408,46 @@ static KrtIRValue irgen_array_size(KrtIRBuilder* builder, KrtIRValue array) {
     return irgen_call_builtin_1arg(builder, IRGEN_FUNC_ARRAY_SIZE, array);
 }
 
-static void KrtIrFillParamTypesForMangle(ASTNode** args, int count, KrtTokenType* out) {
-    for (int i = 0; i < count; i++) {
-        ASTNode* a = args ? args[i] : NULL;
-        if (!a) {
-            out[i] = TOKEN_INT32;
-            continue;
-        }
-        switch (a->type) {
-            case AST_STRING:
-                out[i] = TOKEN_STRING;
-                break;
-            case AST_BOOLEAN:
-                out[i] = TOKEN_BOOL;
-                break;
-            case AST_NUMBER:
-                out[i] = TOKEN_INT32;
-                break;
-            default:
-                out[i] = TOKEN_INT32;
-                break;
-        }
+static KrtTokenType KrtIrInferMangleType(KrtIRBuilder* builder, ASTNode* arg) {
+    if (!arg) return TOKEN_INT32;
+
+    switch (arg->type) {
+        case AST_STRING:
+            return TOKEN_TYPE_STRING;
+        case AST_BOOLEAN:
+            return TOKEN_BOOL;
+        case AST_CHAR_LITERAL:
+            return TOKEN_CHAR;
+        case AST_NUMBER:
+            return TOKEN_INT32;
+        case AST_CAST_EXPRESSION:
+            return arg->data.cast_expr.target_type;
+        case AST_UNARY_OPERATION:
+            return KrtIrInferMangleType(builder, arg->data.unary_op.operand);
+        case AST_IDENTIFIER:
+            if (builder && builder->current_function) {
+                for (int i = 0; i < builder->current_function->param_count; i++) {
+                    if (strcmp(builder->current_function->params[i].name,
+                               arg->data.identifier_name) == 0) {
+                        return builder->current_function->params[i].type;
+                    }
+                }
+            }
+            return TOKEN_INT32;
+        default:
+            return TOKEN_INT32;
     }
 }
 
-static __attribute__((unused)) char* KrtIrMangleCallFunctionName(const char** ns_path, const char* base_name,
+static void KrtIrFillParamTypesForMangle(KrtIRBuilder* builder, ASTNode** args,
+                                         int count, KrtTokenType* out) {
+    for (int i = 0; i < count; i++) {
+        out[i] = KrtIrInferMangleType(builder, args ? args[i] : NULL);
+    }
+}
+
+static __attribute__((unused)) char* KrtIrMangleCallFunctionName(KrtIRBuilder* builder,
+                                         const char** ns_path, const char* base_name,
                                          ASTNode** call_args, int arg_count) {
     if (!base_name) {
         return NULL;
@@ -336,7 +458,7 @@ static __attribute__((unused)) char* KrtIrMangleCallFunctionName(const char** ns
         n = IRGEN_MAX_MANGLE_PARAMS;
     }
     if (n > 0 && call_args) {
-        KrtIrFillParamTypesForMangle(call_args, n, buf);
+        KrtIrFillParamTypesForMangle(builder, call_args, n, buf);
         return name_mangle_function(ns_path, base_name, buf, n);
     }
     return name_mangle_function(ns_path, base_name, NULL, 0);
@@ -870,12 +992,24 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                     (void*)expr->data.call.object,
                     expr->data.call.object ? (int)expr->data.call.object->type : -1);
 
+            if (!expr->data.call.object &&
+                strcmp(func_name, irgen_get_builtin_func(IRGEN_FUNC_MALLOC)) == 0 &&
+                expr->data.call.argument_count == 1) {
+                KrtIRValue size = KrtIrGenerateExpression(builder, expr->data.call.arguments[0]);
+                return irgen_allocate_memory(builder, size);
+            }
+
+            if (!expr->data.call.object &&
+                strcmp(func_name, irgen_get_builtin_func(IRGEN_FUNC_FREE)) == 0 &&
+                expr->data.call.argument_count == 1) {
+                KrtIRValue ptr = KrtIrGenerateExpression(builder, expr->data.call.arguments[0]);
+                irgen_free_memory(builder, ptr);
+                return void_val_return();
+            }
+
             if (expr->data.call.object) {
                 if (expr->data.call.object->type == AST_IDENTIFIER) {
                     const char* class_name = expr->data.call.object->data.identifier_name;
-
-                    char mangled[256];
-                    snprintf(mangled, sizeof(mangled), "%s__%s", class_name, func_name);
 
                     KrtIRValue* args = NULL;
                     if (expr->data.call.argument_count > 0) {
@@ -886,29 +1020,29 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                         }
                     }
 
-                    fprintf(stderr, "[IrGen] Static call: %s -> %s\n", func_name, mangled);
-                    KrtIRValue result = KrtIrCall(builder, mangled, args, expr->data.call.argument_count);
-                    IRGEN_SAFE_FREE(args);
-                    return result;
-                }
-                else if (expr->data.call.object->type == AST_MEMBER_ACCESS) {
-                    ASTNode* member_access = expr->data.call.object;
-                    if (member_access->data.member_access.object && 
-                        member_access->data.member_access.object->type == AST_IDENTIFIER) {
-                        const char* class_name = member_access->data.member_access.object->data.identifier_name;
-                        const char* method_name = member_access->data.member_access.member_name;
-                        
-                        if (strcmp(class_name, "Console") == 0 && strcmp(method_name, "WriteLine") == 0) {
-                            if (expr->data.call.argument_count == 1) {
-                                KrtIRValue* args = IRGEN_ALLOC_ARGS(1);
-                                IRGEN_CHECK_ALLOC(args, void_val_return());
-                                IRGEN_SET_ARG(args, 0, KrtIrGenerateExpression(builder, expr->data.call.arguments[0]));
-                                KrtIRValue result = KrtIrCall(builder, "Console__WriteLine", args, 1);
-                                IRGEN_SAFE_FREE(args);
-                                return result;
-                            }
-                        }
+                    char* fallback_mangled = NULL;
+                    const char* call_func_name = expr->data.call.resolved_mangled_name;
+                    if (!call_func_name) {
+                        const char* ns_path[2] = { class_name, NULL };
+                        fallback_mangled = KrtIrMangleCallFunctionName(
+                            builder, ns_path, func_name, expr->data.call.arguments,
+                            expr->data.call.argument_count);
+                        call_func_name = fallback_mangled ? fallback_mangled : func_name;
                     }
+
+                    fprintf(stderr, "[IrGen] Static call: %s -> %s\n", func_name, call_func_name);
+                    KrtIRValue result;
+                    if (irgen_is_syscall_method(class_name, func_name) &&
+                        expr->data.call.argument_count > 0) {
+                        result = KrtIrSyscall(builder, args[0], args + 1,
+                                              expr->data.call.argument_count - 1);
+                    } else {
+                        result = KrtIrCall(builder, call_func_name, args,
+                                           expr->data.call.argument_count);
+                    }
+                    IRGEN_SAFE_FREE(args);
+                    IRGEN_SAFE_FREE(fallback_mangled);
+                    return result;
                 }
             }
 
@@ -926,22 +1060,21 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
             }
 
             char* call_mangled = NULL;
-            const char* call_func_name = func_name;
-
-            KrtTokenType* param_types = NULL;
-            int arg_count = expr->data.call.argument_count;
-            if (arg_count > 0) {
-                param_types = (KrtTokenType*)KRT_MALLOC(arg_count * sizeof(KrtTokenType));
-                if (param_types) {
-                    KrtIrFillParamTypesForMangle(expr->data.call.arguments, arg_count, param_types);
+            const char* call_func_name = expr->data.call.resolved_mangled_name;
+            if (!call_func_name) {
+                KrtTokenType* param_types = NULL;
+                int arg_count = expr->data.call.argument_count;
+                if (arg_count > 0) {
+                    param_types = (KrtTokenType*)KRT_MALLOC(arg_count * sizeof(KrtTokenType));
+                    if (param_types) {
+                        KrtIrFillParamTypesForMangle(builder, expr->data.call.arguments,
+                                                     arg_count, param_types);
+                    }
                 }
-            }
 
-            call_mangled = name_mangle_function(NULL, func_name, param_types, arg_count);
-            if (param_types) KRT_FREE(param_types);
-
-            if (call_mangled) {
-                call_func_name = call_mangled;
+                call_mangled = name_mangle_function(NULL, func_name, param_types, arg_count);
+                if (param_types) KRT_FREE(param_types);
+                call_func_name = call_mangled ? call_mangled : func_name;
             }
 
             KrtIRValue* args = NULL;
@@ -953,7 +1086,14 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 }
             }
             
-            KrtIRValue result = KrtIrCall(builder, call_func_name, args, expr->data.call.argument_count);
+            KrtIRValue result;
+            if (strcmp(func_name, "syscall") == 0 &&
+                expr->data.call.argument_count > 0) {
+                result = KrtIrSyscall(builder, args[0], args + 1,
+                                      expr->data.call.argument_count - 1);
+            } else {
+                result = KrtIrCall(builder, call_func_name, args, expr->data.call.argument_count);
+            }
             IRGEN_SAFE_FREE(args);
             IRGEN_SAFE_FREE(call_mangled);
             return result;
@@ -965,8 +1105,15 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
 
             fprintf(stderr, "[IrGen] AST_STATIC_METHOD_CALL expr: %s.%s\n", class_name, method_name);
 
-            char* mangled = KrtIrMangleClassMethodName(class_name, method_name, NULL, 0);
-            const char* call_func_name = mangled ? mangled : method_name;
+            char* mangled = NULL;
+            const char* call_func_name = expr->data.static_call.resolved_mangled_name;
+            if (!call_func_name) {
+                const char* ns_path[2] = { class_name, NULL };
+                mangled = KrtIrMangleCallFunctionName(builder, ns_path, method_name,
+                                                      expr->data.static_call.arguments,
+                                                      expr->data.static_call.argument_count);
+                call_func_name = mangled ? mangled : method_name;
+            }
 
             KrtIRValue* args = NULL;
             if (expr->data.static_call.argument_count > 0) {
@@ -977,7 +1124,15 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 }
             }
 
-            KrtIRValue result = KrtIrCall(builder, call_func_name, args, expr->data.static_call.argument_count);
+            KrtIRValue result;
+            if (irgen_is_syscall_method(class_name, method_name) &&
+                expr->data.static_call.argument_count > 0) {
+                result = KrtIrSyscall(builder, args[0], args + 1,
+                                      expr->data.static_call.argument_count - 1);
+            } else {
+                result = KrtIrCall(builder, call_func_name, args,
+                                   expr->data.static_call.argument_count);
+            }
             IRGEN_SAFE_FREE(args);
             IRGEN_SAFE_FREE(mangled);
             return result;
@@ -1027,6 +1182,18 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 KrtIrArrayStore(builder, array_ptr, KrtIrImm(builder, i), elem_val);
             }
             return array_ptr;
+        }
+
+        case AST_ARRAY_ACCESS: {
+            int element_size = irgen_array_element_size(builder, expr->data.array_access.array);
+            KrtIRValue base = KrtIrGenerateExpression(builder, expr->data.array_access.array);
+            KrtIRValue index = KrtIrGenerateExpression(builder, expr->data.array_access.index);
+            KrtIRValue offset = index;
+            if (element_size != 1) {
+                offset = KrtIrMul(builder, index, KrtIrImm(builder, element_size));
+            }
+            KrtIRValue address = KrtIrAdd(builder, base, offset);
+            return KrtIrLoadPtrSized(builder, address, 0, element_size);
         }
 
         case AST_LAMBDA_EXPRESSION: {
@@ -1282,10 +1449,12 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
         }
 
         case AST_ARRAY_ASSIGNMENT: {
-            KrtIrArrayStore(builder,
+            int element_size = irgen_array_element_size(builder, stmt->data.array_assignment.array);
+            KrtIrArrayStoreSized(builder,
                 KrtIrGenerateExpression(builder, stmt->data.array_assignment.array),
                 KrtIrGenerateExpression(builder, stmt->data.array_assignment.index),
-                KrtIrGenerateExpression(builder, stmt->data.array_assignment.value));
+                KrtIrGenerateExpression(builder, stmt->data.array_assignment.value),
+                element_size);
             break;
         }
 
@@ -1489,6 +1658,10 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             KrtIrGenerateBlock(builder, stmt);
             break;
 
+        case AST_POINT_BLOCK:
+            KrtIrGenerateBlock(builder, stmt->data.point_block.body);
+            break;
+
         case AST_SWITCH_STATEMENT: {
             KrtIRValue cond = KrtIrGenerateExpression(builder, stmt->data.switch_stmt.expression);
             char end_label[32];
@@ -1652,7 +1825,10 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
             if (builder->type_context && builder->type_context->current_scope) {
                 TypeCheckSymbol symbol = {0};
                 symbol.name = (char*)stmt->data.variable_decl.name;
-                symbol.type = type_create_from_token(stmt->data.variable_decl.type);
+                Type* element_type = type_create_from_token(stmt->data.variable_decl.type);
+                symbol.type = stmt->data.variable_decl.is_array
+                    ? type_create_array(element_type, 0)
+                    : element_type;
                 if (symbol.type) type_check_symbol_table_add(builder->type_context->current_scope, symbol);
             }
 
@@ -1667,7 +1843,10 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
                 if (try_extract_constant(stmt->data.variable_decl.array_size, &size_value))
                     array_size = (size_value > 0) ? (int)size_value : 10;
 
-                int total_bytes = array_size * IRGEN_POINTER_SIZE;
+                Type* element_type = type_create_from_token(stmt->data.variable_decl.type);
+                int element_size = element_type ? irgen_type_size(element_type->kind) : IRGEN_POINTER_SIZE;
+                type_destroy(element_type);
+                int total_bytes = array_size * element_size;
                 KrtIrAlloc(builder, stmt->data.variable_decl.name);
                 KrtIRValue ptr = irgen_allocate_memory(builder, KrtIrImm(builder, total_bytes));
                 KrtIrStore(builder, stmt->data.variable_decl.name, ptr);
@@ -1679,6 +1858,31 @@ static void KrtIrGenerateStatement(KrtIRBuilder* builder, ASTNode* stmt) {
                     KrtIrStore(builder, stmt->data.variable_decl.name, init_val);
                 }
             }
+            break;
+        }
+
+        case AST_STATIC_VARIABLE_DECLARATION: {
+            const char* name = stmt->data.static_variable_decl.name;
+            const char* current_class = KrtIrCurrentClassContext(builder);
+            char* mangled_name = current_class
+                ? KrtIrMangleStaticMember(current_class, name)
+                : NULL;
+            const char* global_name = mangled_name ? mangled_name : name;
+
+            KrtIRGlobal* global = KrtIrModuleFindGlobal(builder->module, global_name);
+            if (!global) {
+                global = KrtIrModuleAddGlobal(builder, global_name,
+                                              stmt->data.static_variable_decl.type);
+            }
+
+            if (global && stmt->data.static_variable_decl.value) {
+                double value = 0.0;
+                if (KrtIrEvaluateNumericConstant(stmt->data.static_variable_decl.value, &value)) {
+                    KrtIrModuleSetGlobalNumberInitializer(global, value);
+                }
+            }
+
+            IRGEN_SAFE_FREE(mangled_name);
             break;
         }
 
@@ -2146,6 +2350,8 @@ static int KrtIrCheckHasReturn(ASTNode* node) {
             for (int i = 0; i < node->data.block.statement_count; i++)
                 if (KrtIrCheckHasReturn(node->data.block.statements[i])) return 1;
             return 0;
+        case AST_POINT_BLOCK:
+            return KrtIrCheckHasReturn(node->data.point_block.body);
         case AST_IF_STATEMENT:
             return KrtIrCheckHasReturn(node->data.if_stmt.then_branch) &&
                    (!node->data.if_stmt.else_branch || KrtIrCheckHasReturn(node->data.if_stmt.else_branch));

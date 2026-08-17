@@ -153,7 +153,8 @@ bool ir_optimize_constant_folding(KrtIRModule* module, IROptimizer* stats) {
             while (inst) {
                 KrtIRInst* next = inst->next;
                 
-                if (inst->operand_count >= 2 &&
+                if (inst->operand_count == 2 &&
+                    is_pure_operation(inst->opcode) &&
                     is_constant_value(&inst->operands[0]) &&
                     is_constant_value(&inst->operands[1])) {
 

@@ -13,6 +13,7 @@
 ASTNode* parser_parse_statement(Parser* parser);
 ASTNode* parser_parse_block(Parser* parser);
 ASTNode* parser_parse_namespace_declaration(Parser* parser);
+ASTNode* parser_parse_class_declaration(Parser* parser);
 
 #define PARSER_LIKELY(x) (x)
 #define PARSER_UNLIKELY(x) (x)
@@ -48,7 +49,7 @@ static KrtTokenType token_type_to_krt_type(KrtTokenType token_type) {
         case TOKEN_FLOAT32: return TOKEN_FLOAT32;
         case TOKEN_FLOAT64: return TOKEN_FLOAT64;
         case TOKEN_BOOL: return TOKEN_BOOL;
-        case TOKEN_STRING: return TOKEN_STRING;
+        case TOKEN_TYPE_STRING: return TOKEN_TYPE_STRING;
         case TOKEN_CHAR: return TOKEN_CHAR;
         default: return TOKEN_VOID;
     }
@@ -60,6 +61,10 @@ static ASTNode* parser_parse_function_declaration(Parser* parser) {
     
     KrtTokenType return_type = token_type_to_krt_type(parser->current_token.type);
     parser_advance(parser);
+
+    while (parser->current_token.type == TOKEN_MULTIPLY) {
+        parser_advance(parser);
+    }
     
     if (parser->current_token.type != TOKEN_IDENTIFIER) {
         return NULL;
@@ -77,12 +82,14 @@ static ASTNode* parser_parse_function_declaration(Parser* parser) {
     char** param_names = NULL;
     KrtTokenType* param_types = NULL;
     int* param_is_params = NULL;
+    int* param_is_array = NULL;
     int param_count = 0;
     int param_capacity = 8;
     
     param_names = (char**)KrtArenaAlloc(parser->arena, param_capacity * sizeof(char*));
     param_types = (KrtTokenType*)KrtArenaAlloc(parser->arena, param_capacity * sizeof(KrtTokenType));
     param_is_params = (int*)KrtArenaAlloc(parser->arena, param_capacity * sizeof(int));
+    param_is_array = (int*)KrtArenaAlloc(parser->arena, param_capacity * sizeof(int));
     
     while (parser->current_token.type != TOKEN_RIGHT_PAREN && 
            parser->current_token.type != TOKEN_EOF) {
@@ -91,16 +98,34 @@ static ASTNode* parser_parse_function_declaration(Parser* parser) {
             char** new_names = (char**)KrtArenaAlloc(parser->arena, param_capacity * sizeof(char*));
             KrtTokenType* new_types = (KrtTokenType*)KrtArenaAlloc(parser->arena, param_capacity * sizeof(KrtTokenType));
             int* new_is_params = (int*)KrtArenaAlloc(parser->arena, param_capacity * sizeof(int));
+            int* new_is_array = (int*)KrtArenaAlloc(parser->arena, param_capacity * sizeof(int));
             memcpy(new_names, param_names, param_count * sizeof(char*));
             memcpy(new_types, param_types, param_count * sizeof(KrtTokenType));
             memcpy(new_is_params, param_is_params, param_count * sizeof(int));
+            memcpy(new_is_array, param_is_array, param_count * sizeof(int));
             param_names = new_names;
             param_types = new_types;
             param_is_params = new_is_params;
+            param_is_array = new_is_array;
         }
         
         KrtTokenType ptype = token_type_to_krt_type(parser->current_token.type);
         parser_advance(parser);
+
+        while (parser->current_token.type == TOKEN_MULTIPLY) {
+            parser_advance(parser);
+        }
+
+        int is_array_param = 0;
+        if (parser->current_token.type == TOKEN_LEFT_BRACKET) {
+            parser_advance(parser);
+            if (parser->current_token.type != TOKEN_RIGHT_BRACKET) {
+                KRT_FREE(func_name);
+                return NULL;
+            }
+            parser_advance(parser);
+            is_array_param = 1;
+        }
         
         if (parser->current_token.type != TOKEN_IDENTIFIER) {
             KRT_FREE(func_name);
@@ -110,6 +135,7 @@ static ASTNode* parser_parse_function_declaration(Parser* parser) {
         param_names[param_count] = arena_strdup(parser->arena, parser->current_token.value);
         param_types[param_count] = ptype;
         param_is_params[param_count] = 1;
+        param_is_array[param_count] = is_array_param;
         param_count++;
         
         parser_advance(parser);
@@ -150,13 +176,44 @@ static ASTNode* parser_parse_function_declaration(Parser* parser) {
     node->data.function_decl.parameter_types = param_types;
     node->data.function_decl.parameter_is_params = param_is_params;
     node->data.function_decl.parameter_is_nullable = NULL;
-    node->data.function_decl.parameter_is_array = NULL;
+    node->data.function_decl.parameter_is_array = param_is_array;
     node->data.function_decl.parameter_default_values = NULL;
     node->data.function_decl.body = body;
     node->data.function_decl.return_type = return_type;
     node->data.function_decl.is_async = 0;
     
     return node;
+}
+
+static ASTNode* parser_parse_declaration_with_modifiers(Parser* parser) {
+    int is_static = 0;
+    int is_const = 0;
+    while (parser->current_token.type == TOKEN_PUBLIC ||
+           parser->current_token.type == TOKEN_PRIVATE ||
+           parser->current_token.type == TOKEN_PROTECTED ||
+           parser->current_token.type == TOKEN_STATIC ||
+           parser->current_token.type == TOKEN_CONST ||
+           parser->current_token.type == TOKEN_EXTERN) {
+        if (parser->current_token.type == TOKEN_STATIC) {
+            is_static = 1;
+        } else if (parser->current_token.type == TOKEN_CONST) {
+            is_const = 1;
+        }
+        parser_advance(parser);
+    }
+
+    if (parser->current_token.type == TOKEN_CLASS) {
+        return parser_parse_class_declaration(parser);
+    }
+
+    ASTNode* declaration = parser_parse_statement(parser);
+    if (is_static && declaration && declaration->type == AST_FUNCTION_DECLARATION) {
+        declaration->type = AST_STATIC_FUNCTION_DECLARATION;
+    } else if ((is_static || is_const) && declaration &&
+               declaration->type == AST_VARIABLE_DECLARATION) {
+        declaration->type = AST_STATIC_VARIABLE_DECLARATION;
+    }
+    return declaration;
 }
 
 static ASTNode* parser_parse_variable_declaration(Parser* parser) {
@@ -286,6 +343,23 @@ static ASTNode* parser_parse_variable_declaration_with_type(Parser* parser) {
     }
     parser_advance(parser);
 
+    int pointer_depth = 0;
+    while (parser->current_token.type == TOKEN_MULTIPLY) {
+        pointer_depth++;
+        parser_advance(parser);
+    }
+
+    bool is_array = false;
+    if (parser->current_token.type == TOKEN_LEFT_BRACKET) {
+        parser_advance(parser);
+        if (parser->current_token.type != TOKEN_RIGHT_BRACKET) {
+            KRT_FREE(type_name);
+            return NULL;
+        }
+        parser_advance(parser);
+        is_array = true;
+    }
+
     char* name = NULL;
     if (parser->current_token.type == TOKEN_IDENTIFIER) {
         name = arena_strdup(parser->arena, parser->current_token.value);
@@ -306,7 +380,6 @@ static ASTNode* parser_parse_variable_declaration_with_type(Parser* parser) {
     }
 
     ASTNode* array_size = NULL;
-    bool is_array = false;
 
     if (parser->current_token.type == TOKEN_LEFT_BRACKET) {
         parser_advance(parser);
@@ -361,6 +434,7 @@ static ASTNode* parser_parse_variable_declaration_with_type(Parser* parser) {
     node->data.variable_decl.array_size = array_size;
     node->data.variable_decl.is_array = is_array;
     node->data.variable_decl.is_let = 0;
+    node->data.variable_decl.pointer_depth = pointer_depth;
 
     return node;
 }
@@ -781,6 +855,23 @@ ASTNode* parser_parse_statement(Parser* parser) {
     Token token = parser->current_token;
 
     switch (token.type) {
+        case TOKEN_POINT: {
+            int line = token.line;
+            int col = token.column;
+            parser_advance(parser);
+
+            ASTNode* body = parser_parse_block(parser);
+            if (!body) return NULL;
+
+            ASTNode* node = ast_create_node(AST_POINT_BLOCK, line, col);
+            if (!node) {
+                ast_destroy_node(body);
+                return NULL;
+            }
+            node->data.point_block.body = body;
+            return node;
+        }
+
         case TOKEN_VAR:
         case TOKEN_LET:
             return parser_parse_variable_declaration(parser);
@@ -835,6 +926,17 @@ ASTNode* parser_parse_statement(Parser* parser) {
             ASTNode* ns = parser_parse_namespace_declaration(parser);
             return ns;
         }
+
+        case TOKEN_CLASS:
+            return parser_parse_class_declaration(parser);
+
+        case TOKEN_PUBLIC:
+        case TOKEN_PRIVATE:
+        case TOKEN_PROTECTED:
+        case TOKEN_STATIC:
+        case TOKEN_CONST:
+        case TOKEN_EXTERN:
+            return parser_parse_declaration_with_modifiers(parser);
 
         case TOKEN_USING: {
             int line = parser->current_token.line;
@@ -911,7 +1013,7 @@ ASTNode* parser_parse_statement(Parser* parser) {
         case TOKEN_UINT8: case TOKEN_UINT16: case TOKEN_UINT32: case TOKEN_UINT64:
         case TOKEN_FLOAT32: case TOKEN_FLOAT64:
         case TOKEN_BOOL:
-        case TOKEN_STRING:
+        case TOKEN_TYPE_STRING:
         case TOKEN_CHAR:
         case TOKEN_IDENTIFIER: {
             Token next_token = lexer_peek_token(parser->lexer);
@@ -930,6 +1032,35 @@ ASTNode* parser_parse_statement(Parser* parser) {
                     token_free(&third_token);
                     return parser_parse_variable_declaration_with_type(parser);
                 }
+            } else if (next_token.type == TOKEN_LEFT_BRACKET) {
+                Token bracket_token = lexer_peek_nth_token(parser->lexer, 2);
+                bool is_array_type_declaration = token.type != TOKEN_IDENTIFIER ||
+                                                 bracket_token.type == TOKEN_RIGHT_BRACKET;
+                token_free(&next_token);
+                token_free(&bracket_token);
+                if (is_array_type_declaration) {
+                    return parser_parse_variable_declaration_with_type(parser);
+                }
+
+                ASTNode* expr = parser_parse_expression(parser);
+                if (!expr) return NULL;
+                ASTNode* stmt = parser_parse_assignment_from_left(parser, expr);
+                if (parser->current_token.type != TOKEN_SEMICOLON) {
+                    ast_destroy_node(stmt);
+                    return NULL;
+                }
+                parser_advance(parser);
+                return stmt;
+            } else if (next_token.type == TOKEN_MULTIPLY) {
+                Token name_token = lexer_peek_nth_token(parser->lexer, 2);
+                Token after_name = lexer_peek_nth_token(parser->lexer, 3);
+                bool is_function = name_token.type == TOKEN_IDENTIFIER &&
+                                   after_name.type == TOKEN_LEFT_PAREN;
+                token_free(&next_token);
+                token_free(&name_token);
+                token_free(&after_name);
+                return is_function ? parser_parse_function_declaration(parser)
+                                   : parser_parse_variable_declaration_with_type(parser);
             } else {
                 token_free(&next_token);
                 token_free(&third_token);

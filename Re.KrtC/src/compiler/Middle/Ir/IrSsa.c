@@ -1125,8 +1125,41 @@ void KrtIrSsaLowerPhis(KrtIRFunction* func, KrtIRMemoryArena* arena) {
                     
                     move_inst->operands[0] = *val;
                     move_inst->result = phi->inst->result;
-                    
-                    pred->insts[pred->inst_count++] = move_inst;
+
+                    int insert_at = pred->inst_count;
+                    KrtIRInst* terminator = NULL;
+                    if (pred->inst_count > 0) {
+                        KrtIRInst* last = pred->insts[pred->inst_count - 1];
+                        if (last && (last->opcode == KRT_IR_JUMP ||
+                                     last->opcode == KRT_IR_BRANCH ||
+                                     last->opcode == KRT_IR_RETURN)) {
+                            insert_at = pred->inst_count - 1;
+                            terminator = last;
+                        }
+                    }
+
+                    for (int j = pred->inst_count; j > insert_at; j--) {
+                        pred->insts[j] = pred->insts[j - 1];
+                    }
+                    pred->insts[insert_at] = move_inst;
+                    pred->inst_count++;
+
+                    if (terminator) {
+                        KrtIRInst* prev = NULL;
+                        KrtIRInst* current = pred->first_inst;
+                        while (current && current != terminator) {
+                            prev = current;
+                            current = current->next;
+                        }
+                        move_inst->next = terminator;
+                        if (prev) prev->next = move_inst;
+                        else pred->first_inst = move_inst;
+                    } else {
+                        move_inst->next = NULL;
+                        if (pred->last_inst) pred->last_inst->next = move_inst;
+                        else pred->first_inst = move_inst;
+                        pred->last_inst = move_inst;
+                    }
                 }
                 phi = phi->next;
             }
@@ -1186,7 +1219,8 @@ static void ssa_eliminate_dead_code(KrtIRFunction* func) {
             }
             
             if (is_used || inst->opcode == KRT_IR_RETURN ||
-                inst->opcode == KRT_IR_CALL || inst->opcode == KRT_IR_BRANCH ||
+                inst->opcode == KRT_IR_CALL || inst->opcode == KRT_IR_SYSCALL ||
+                inst->opcode == KRT_IR_BRANCH ||
                 inst->opcode == KRT_IR_JUMP || inst->opcode == KRT_IR_STORE ||
                 inst->opcode == KRT_IR_ALLOC || inst->opcode == KRT_IR_LOAD) {
                 block->insts[new_count++] = inst;

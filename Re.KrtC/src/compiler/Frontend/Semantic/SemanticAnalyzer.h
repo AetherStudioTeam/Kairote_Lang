@@ -8,15 +8,15 @@
 #include "../CompilerError.h"
 
 typedef struct UsingDirective {
-    char* alias;
-    char** namespace_path;
+    char* alias;  
+    char** namespace_path;  
     int path_length;
-    int is_alias;
+    int is_alias;  
 } UsingDirective;
 
 typedef struct SemanticAnalyzer {
     SymbolTable* symbol_table;
-    SymbolTable* global_symbol_table;
+    SymbolTable* global_symbol_table;  
     KrtIRBuilder* ir_builder;
     int error_count;
     int warning_count;
@@ -30,17 +30,18 @@ typedef struct SemanticAnalyzer {
     GenericRegistry* generic_registry;
     bool generic_registry_shared;
     int is_unsafe_mode;
+    int point_depth;
     
     UsingDirective** using_directives;
     int using_count;
     int using_capacity;
 
-    char* input_file_path;
-    char* libs_path;
+    char* input_file_path;          /* 源文件路径, 用于解析相对 libs/ 路径 */
+    char* libs_path;                /* 解析后的 libs 目录路径 */
 
-    void* pipeline;
+    void* pipeline;                 /* 编译管道指针 (用于注册导入文件) */
 
-    KrtErrorReport* error_report;
+    KrtErrorReport* error_report;  /* 增强的错误报告 */
 } SemanticAnalyzer;
 
 typedef struct SemanticAnalysisResult {
@@ -49,7 +50,7 @@ typedef struct SemanticAnalysisResult {
     int warning_count;
     SymbolTable* symbol_table;
     char* error_messages;
-    KrtErrorReport* error_report;
+    KrtErrorReport* error_report;  /* 增强的错误报告 */
 } SemanticAnalysisResult;
 
 SemanticAnalyzer* semantic_analyzer_create(void);
@@ -117,6 +118,7 @@ SymbolEntry* semantic_analyzer_lookup_qualified_name(SemanticAnalyzer* analyzer,
                                                      int part_count);
 const char* semantic_analyzer_get_current_class_context(SemanticAnalyzer* analyzer);
 
+/* Collect exported symbols from an AST without full analysis */
 void semantic_analyzer_collect_exports(SemanticAnalyzer* analyzer, ASTNode* ast);
 
 #endif
