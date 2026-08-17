@@ -1085,12 +1085,9 @@ ArkLinkResult ark_backend_elf_link(ArkLinkContext* ctx, ArkBackendInput* input, 
 
 
         size_t func_import_count = 0;
-        size_t data_import_count = 0;
         for (size_t i = 0; i < input->import_count; i++) {
             if (input->imports[i].is_function) {
                 func_import_count++;
-            } else {
-                data_import_count++;
             }
         }
 
