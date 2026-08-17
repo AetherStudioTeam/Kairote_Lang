@@ -1,5 +1,5 @@
-#include "ArkLink/backend_pe.h"
-#include "ArkLink/loader.h"
+#include "ArkLink/BackendPe.h"
+#include "ArkLink/Loader.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -319,61 +319,22 @@ static uint8_t* generate_relocation_table(ArkBackendInput* input, ArkSectionRvaM
     return reloc_data;
 }
 
-typedef struct {
-    uint8_t* data;
-    size_t size;
-    size_t capacity;
-    uint32_t rva;
-} ImportTableBuilder;
+typedef ArkBuffer ImportTableBuilder;
 
 static ImportTableBuilder* import_builder_create(size_t initial_capacity, uint32_t rva) {
-    ImportTableBuilder* builder = (ImportTableBuilder*)malloc(sizeof(ImportTableBuilder));
-    if (!builder) return NULL;
-    
-    builder->data = (uint8_t*)calloc(1, initial_capacity);
-    if (!builder->data) {
-        free(builder);
-        return NULL;
-    }
-    
-    builder->size = 0;
-    builder->capacity = initial_capacity;
-    builder->rva = rva;
-    return builder;
+    return ark_buffer_create(initial_capacity, rva);
 }
 
 static void import_builder_free(ImportTableBuilder* builder) {
-    if (builder) {
-        free(builder->data);
-        free(builder);
-    }
+    ark_buffer_destroy(builder);
 }
 
 static size_t import_builder_append(ImportTableBuilder* builder, const void* data, size_t len) {
-    if (builder->size + len > builder->capacity) {
-        size_t new_capacity = builder->capacity * 2;
-        while (new_capacity < builder->size + len) {
-            new_capacity *= 2;
-        }
-        uint8_t* new_data = (uint8_t*)realloc(builder->data, new_capacity);
-        if (!new_data) return (size_t)-1;
-        builder->data = new_data;
-        builder->capacity = new_capacity;
-    }
-    
-    size_t offset = builder->size;
-    if (data) {
-        memcpy(builder->data + offset, data, len);
-    } else {
-        
-        memset(builder->data + offset, 0, len);
-    }
-    builder->size += len;
-    return offset;
+    return ark_buffer_append(builder, data, len);
 }
 
 static uint32_t import_builder_get_rva(ImportTableBuilder* builder, size_t offset) {
-    return builder->rva + (uint32_t)offset;
+    return ark_buffer_get_rva(builder, offset);
 }
 
 static uint8_t* generate_import_table(ArkBackendInput* input, uint32_t idata_rva, 
@@ -494,21 +455,27 @@ static uint8_t* generate_import_table(ArkBackendInput* input, uint32_t idata_rva
         
         for (size_t i = 0; i < sym_count; i++) {
             size_t import_idx = sym_indices[i];
-            
+
+            fprintf(stderr, "[PeBackend]   Import[%zu]: %s.%s (%s)\n",
+                    import_idx,
+                    module_name,
+                    input->imports[import_idx].symbol,
+                    input->imports[import_idx].is_function ? "FUNC" : "DATA");
+
             size_t hint_name_offset = builder->size;
-            uint16_t hint = 0;  
+            uint16_t hint = 0;
             if (import_builder_append(builder, &hint, sizeof(hint)) == (size_t)-1) {
                 free(sym_indices);
                 goto fail;
             }
-            
+
             const char* sym_name = input->imports[import_idx].symbol;
             size_t sym_name_len = strlen(sym_name) + 1;
             if (import_builder_append(builder, sym_name, sym_name_len) == (size_t)-1) {
                 free(sym_indices);
                 goto fail;
             }
-            
+
             if (sym_name_len % 2 != 0) {
                 uint8_t pad = 0;
                 if (import_builder_append(builder, &pad, 1) == (size_t)-1) {
@@ -516,10 +483,18 @@ static uint8_t* generate_import_table(ArkBackendInput* input, uint32_t idata_rva
                     goto fail;
                 }
             }
-            
+
             uint64_t entry_value = import_builder_get_rva(builder, hint_name_offset);
+
             ilt[i].Value = entry_value;
-            iat[i].Value = entry_value;
+
+            if (input->imports[import_idx].is_function) {
+
+                iat[i].Value = entry_value;
+            } else {
+
+                iat[i].Value = 0;
+            }
         }
         
         free(sym_indices);
@@ -565,56 +540,22 @@ fail:
     return NULL;
 }
 
-typedef struct {
-    uint8_t* data;
-    size_t size;
-    size_t capacity;
-    uint32_t base_rva;
-} ExportTableBuilder;
+typedef ArkBuffer ExportTableBuilder;
 
 static ExportTableBuilder* export_builder_create(size_t initial_capacity, uint32_t base_rva) {
-    ExportTableBuilder* builder = (ExportTableBuilder*)calloc(1, sizeof(ExportTableBuilder));
-    if (!builder) return NULL;
-    
-    builder->data = (uint8_t*)malloc(initial_capacity);
-    if (!builder->data) {
-        free(builder);
-        return NULL;
-    }
-    
-    builder->capacity = initial_capacity;
-    builder->base_rva = base_rva;
-    return builder;
+    return ark_buffer_create(initial_capacity, base_rva);
 }
 
 static void export_builder_free(ExportTableBuilder* builder) {
-    if (builder) {
-        free(builder->data);
-        free(builder);
-    }
+    ark_buffer_destroy(builder);
 }
 
 static size_t export_builder_append(ExportTableBuilder* builder, const void* data, size_t size) {
-    if (builder->size + size > builder->capacity) {
-        size_t new_capacity = builder->capacity * 2;
-        uint8_t* new_data = (uint8_t*)realloc(builder->data, new_capacity);
-        if (!new_data) return (size_t)-1;
-        builder->data = new_data;
-        builder->capacity = new_capacity;
-    }
-    
-    size_t offset = builder->size;
-    if (data) {
-        memcpy(builder->data + offset, data, size);
-    } else {
-        memset(builder->data + offset, 0, size);
-    }
-    builder->size += size;
-    return offset;
+    return ark_buffer_append(builder, data, size);
 }
 
 static uint32_t export_builder_get_rva(ExportTableBuilder* builder, size_t offset) {
-    return builder->base_rva + (uint32_t)offset;
+    return ark_buffer_get_rva(builder, offset);
 }
 
 static int compare_export_entries(const void* a, const void* b) {
@@ -742,21 +683,27 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
     const uint32_t pe_signature_size = 4;
     const uint32_t section_alignment = 0x1000;
     const uint32_t file_alignment = 0x200;
-    
+
+    ArkImageLayout* layout = ark_layout_create(input, section_alignment, file_alignment);
+    if (!layout) {
+        return ARK_LINK_ERR_MEMORY;
+    }
+
     size_t reloc_data_size = 0;
     uint8_t* reloc_data = NULL;
     
     ArkSectionRvaMap* temp_maps = (ArkSectionRvaMap*)calloc(input->section_count, sizeof(ArkSectionRvaMap));
     if (!temp_maps) {
+        ark_layout_destroy(layout);
         return ARK_LINK_ERR_MEMORY;
     }
     
-    uint32_t current_rva = section_alignment;
     for (size_t i = 0; i < input->section_count; i++) {
-        temp_maps[i].rva = current_rva;
-        temp_maps[i].size = (uint32_t)input->sections[i].size;
-        uint32_t aligned_size = (uint32_t)((input->sections[i].size + section_alignment - 1) & ~(section_alignment - 1));
-        current_rva += aligned_size;
+        const ArkSectionLayout* sec = ark_layout_get_section(layout, i);
+        if (sec) {
+            temp_maps[i].rva = (uint32_t)(sec->virtual_address - layout->image_base);
+            temp_maps[i].size = (uint32_t)input->sections[i].size;
+        }
     }
     
     reloc_data = generate_relocation_table(input, temp_maps, &reloc_data_size);
@@ -766,27 +713,18 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
     size_t import_iat_total_entries = 0;
     uint8_t* import_data = NULL;
     
-    uint32_t idata_rva = current_rva;
+    uint32_t idata_rva = (uint32_t)(layout->data_segment_end - layout->image_base);
     if (input->imports && input->import_count > 0) {
         import_data = generate_import_table(input, idata_rva, &import_data_size, &import_iat_rva, &import_iat_total_entries);
-    }
-    
-    if (import_data_size > 0) {
-        uint32_t idata_aligned_size = (uint32_t)((import_data_size + section_alignment - 1) & ~(section_alignment - 1));
-        current_rva += idata_aligned_size;
     }
     
     size_t export_data_size = 0;
     uint8_t* export_data = NULL;
     
-    uint32_t edata_rva = current_rva;
+    uint32_t edata_rva = idata_rva + (import_data_size > 0 ? 
+        (uint32_t)((import_data_size + section_alignment - 1) & ~(section_alignment - 1)) : 0);
     if (input->exports && input->export_count > 0) {
         export_data = generate_export_table(input, edata_rva, &export_data_size, temp_maps);
-    }
-    
-    if (export_data_size > 0) {
-        uint32_t edata_aligned_size = (uint32_t)((export_data_size + section_alignment - 1) & ~(section_alignment - 1));
-        current_rva += edata_aligned_size;
     }
     
     int has_reloc_section = (reloc_data_size > 0);
@@ -798,56 +736,30 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
     uint32_t section_table_size = (uint32_t)(total_sections * sizeof(PE_SECTION_HEADER));
     uint32_t total_header_size = dos_header_size + pe_header_size + section_table_size;
     
-    uint32_t headers_size = (total_header_size + file_alignment - 1) & ~(file_alignment - 1);
-    
-    uint32_t image_size = section_alignment; 
-    for (size_t i = 0; i < input->section_count; i++) {
-        uint32_t section_size = (uint32_t)((input->sections[i].size + section_alignment - 1) & ~(section_alignment - 1));
-        image_size += section_size;
-    }
-    
-    uint32_t idata_virtual_size = 0;
-    uint32_t idata_raw_size = 0;
-    if (has_idata_section) {
-        idata_virtual_size = (uint32_t)((import_data_size + section_alignment - 1) & ~(section_alignment - 1));
-        idata_raw_size = (uint32_t)((import_data_size + file_alignment - 1) & ~(file_alignment - 1));
-        image_size += idata_virtual_size;
-    }
-    
-    uint32_t edata_virtual_size = 0;
-    uint32_t edata_raw_size = 0;
-    if (has_edata_section) {
-        edata_virtual_size = (uint32_t)((export_data_size + section_alignment - 1) & ~(section_alignment - 1));
-        edata_raw_size = (uint32_t)((export_data_size + file_alignment - 1) & ~(file_alignment - 1));
-        image_size += edata_virtual_size;
-    }
-    
-    uint32_t reloc_virtual_size = 0;
-    uint32_t reloc_raw_size = 0;
-    if (has_reloc_section) {
-        reloc_virtual_size = (uint32_t)((reloc_data_size + section_alignment - 1) & ~(section_alignment - 1));
-        reloc_raw_size = (uint32_t)((reloc_data_size + file_alignment - 1) & ~(file_alignment - 1));
-        image_size += reloc_virtual_size;
-    }
-    
+    uint32_t headers_size = ark_backend_align_up_32(total_header_size, file_alignment);
+    uint32_t image_size = (uint32_t)ark_layout_calc_total_size(layout, 1);
+
     size_t total_file_size = headers_size;
     for (size_t i = 0; i < input->section_count; i++) {
-        uint32_t raw_size = (uint32_t)((input->sections[i].size + file_alignment - 1) & ~(file_alignment - 1));
-        total_file_size += raw_size;
+        const ArkSectionLayout* sec = ark_layout_get_section(layout, i);
+        if (sec && sec->segment_type != ARK_SEGMENT_BSS) {
+            total_file_size += ark_backend_align_up(sec->file_size, file_alignment);
+        }
     }
     if (has_idata_section) {
-        total_file_size += idata_raw_size;
+        total_file_size += ark_backend_align_up(import_data_size, file_alignment);
     }
     if (has_edata_section) {
-        total_file_size += edata_raw_size;
+        total_file_size += ark_backend_align_up(export_data_size, file_alignment);
     }
     if (has_reloc_section) {
-        total_file_size += reloc_raw_size;
+        total_file_size += ark_backend_align_up(reloc_data_size, file_alignment);
     }
 
     output->data = (uint8_t*)calloc(1, total_file_size);
     if (!output->data) {
         free(temp_maps);
+        ark_layout_destroy(layout);
         if (reloc_data) free(reloc_data);
         if (import_data) free(import_data);
         if (export_data) free(export_data);
@@ -855,12 +767,13 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
     }
 
     output->size = total_file_size;
-    output->image_base = input->image_base ? input->image_base : 0x140000000;
+    output->image_base = layout->image_base;
 
     output->section_maps = (ArkSectionRvaMap*)calloc(total_sections, sizeof(ArkSectionRvaMap));
     if (!output->section_maps) {
         free(output->data);
         free(temp_maps);
+        ark_layout_destroy(layout);
         if (reloc_data) free(reloc_data);
         if (import_data) free(import_data);
         output->data = NULL;
@@ -873,19 +786,36 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
 
     uint32_t entry_point_rva = section_alignment;
     if (input->entry_section > 0 && input->entry_section <= input->section_count) {
-        entry_point_rva = temp_maps[input->entry_section - 1].rva + input->entry_offset;
-    }
-
-    if (has_idata_section) {
-        
+        const ArkSectionLayout* sec = ark_layout_get_section(layout, input->entry_section - 1);
+        if (sec) {
+            entry_point_rva = (uint32_t)(sec->virtual_address - layout->image_base) + input->entry_offset;
+        }
     }
 
     uint32_t reloc_rva = 0;
     if (has_reloc_section) {
-        reloc_rva = current_rva;
-        if (has_idata_section) {
-            reloc_rva = idata_rva + idata_virtual_size;
-        }
+        reloc_rva = edata_rva + (export_data_size > 0 ?
+            (uint32_t)((export_data_size + section_alignment - 1) & ~(section_alignment - 1)) : 0);
+    }
+
+    uint32_t idata_virtual_size = 0;
+    uint32_t idata_raw_size = 0;
+    uint32_t edata_virtual_size = 0;
+    uint32_t edata_raw_size = 0;
+    uint32_t reloc_raw_size = 0;
+
+    if (has_idata_section) {
+        idata_virtual_size = (uint32_t)ark_backend_align_up(import_data_size, section_alignment);
+        idata_raw_size = (uint32_t)ark_backend_align_up(import_data_size, file_alignment);
+    }
+    
+    if (has_edata_section) {
+        edata_virtual_size = (uint32_t)ark_backend_align_up(export_data_size, section_alignment);
+        edata_raw_size = (uint32_t)ark_backend_align_up(export_data_size, file_alignment);
+    }
+    
+    if (has_reloc_section) {
+        reloc_raw_size = (uint32_t)ark_backend_align_up(reloc_data_size, file_alignment);
     }
 
     uint32_t pe_offset = 0x80;
@@ -995,7 +925,7 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
         opt->DataDirectory[PE_DD_BASE_RELOCATION].Size = (uint32_t)reloc_data_size;
     }
 
-    current_rva = section_alignment;
+    uint32_t current_rva = section_alignment;
     uint32_t current_file_offset = headers_size;
 
     for (size_t i = 0; i < input->section_count; i++) {
@@ -1132,32 +1062,43 @@ ArkLinkResult ark_backend_pe_link(ArkLinkContext* ctx, ArkBackendInput* input, A
 
             uint32_t reloc_file_offset = output->section_maps[reloc->section_index].file_offset + reloc->offset;
 
+            ArkRelocProcessor proc = {0};
+            
             switch (reloc->type) {
-                case ARK_RELOC_ABS64: {
-                    
-                    uint64_t value = symbol_addr + reloc->addend;
-                    memcpy(output->data + reloc_file_offset, &value, sizeof(uint64_t));
+                case ARK_RELOC_ABS64:
+                    proc.action = ARK_RELOC_APPLY_ABSOLUTE;
+                    proc.field_size = ARK_RELOC_FIELD_64;
                     break;
-                }
-                case ARK_RELOC_ADDR32: {
-                    
-                    uint32_t value = (uint32_t)(symbol_addr + reloc->addend);
-                    memcpy(output->data + reloc_file_offset, &value, sizeof(uint32_t));
+                case ARK_RELOC_ADDR32:
+                    proc.action = ARK_RELOC_APPLY_ABSOLUTE;
+                    proc.field_size = ARK_RELOC_FIELD_32;
                     break;
-                }
-                case ARK_RELOC_PC32: {
-                    
-                    uint32_t reloc_rva = output->section_maps[reloc->section_index].rva + reloc->offset;
-                    uint32_t value = (uint32_t)(symbol_addr + reloc->addend - (output->image_base + reloc_rva + 4));
-                    memcpy(output->data + reloc_file_offset, &value, sizeof(uint32_t));
+                case ARK_RELOC_PC32:
+                    proc.action = ARK_RELOC_APPLY_RELATIVE;
+                    proc.field_size = ARK_RELOC_FIELD_32;
+                    proc.is_pc_relative = 1;
                     break;
-                }
                 default:
-                    break;
+                    continue;
             }
+            
+            proc.target_section = reloc->section_index;
+            proc.offset = reloc->offset;
+            proc.symbol_value = symbol_addr;
+            proc.addend = reloc->addend;
+            
+            uint64_t p_vaddr = 0;
+            if (proc.is_pc_relative) {
+                p_vaddr = output->image_base + output->section_maps[reloc->section_index].rva + reloc->offset;
+            }
+            
+            ark_reloc_apply_pe_base(output->data + reloc_file_offset,
+                                    output->size - reloc_file_offset,
+                                    &proc, p_vaddr);
         }
     }
 
+    ark_layout_destroy(layout);
     free(temp_maps);
     if (reloc_data) free(reloc_data);
     if (import_data) free(import_data);

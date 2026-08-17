@@ -1,4 +1,4 @@
-#include "ArkLink/loader.h"
+#include "ArkLink/Loader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +42,10 @@ void ark_link_unit_destroy(ArkLinkUnit* unit) {
         free(unit->symbols);
     }
 
+    if (unit->relocations.relocs) {
+        free(unit->relocations.relocs);
+    }
+
     if (unit->file_data) {
         free(unit->file_data);
     }
@@ -50,7 +54,7 @@ void ark_link_unit_destroy(ArkLinkUnit* unit) {
 }
 
 ArkLinkSection* ark_link_unit_add_section(ArkLinkUnit* unit, const ArkSectionDesc* desc) {
-    if (!unit || !desc) return NULL;
+    if (!unit || !desc || !desc->name) return NULL;
 
     ArkLinkSection* new_sections = (ArkLinkSection*)realloc(unit->sections,
         (unit->section_count + 1) * sizeof(ArkLinkSection));
@@ -113,6 +117,18 @@ int ark_link_section_add_reloc(ArkLinkSection* section, const ArkRelocationDesc*
     return 1;
 }
 
+int ark_link_unit_add_reloc(ArkLinkUnit* unit, const ArkRelocationDesc* desc) {
+    if (!unit || !desc) return 0;
+
+    ArkRelocationDesc* new_relocs = (ArkRelocationDesc*)realloc(unit->relocations.relocs,
+        (unit->relocations.count + 1) * sizeof(ArkRelocationDesc));
+    if (!new_relocs) return 0;
+
+    unit->relocations.relocs = new_relocs;
+    unit->relocations.relocs[unit->relocations.count++] = *desc;
+    return 1;
+}
+
 ArkLinkResult ark_loader_load_unit(ArkLinkContext* ctx, const char* path, const ArkLoaderOptions* opts,
                                    ArkLinkUnit** out_unit, ArkLoaderDiagnostics* diag) {
     if (!path || !out_unit) {
@@ -144,9 +160,11 @@ ArkLinkResult ark_loader_load_unit(ArkLinkContext* ctx, const char* path, const 
         FILE* magic_file = fopen(path, "rb");
         if (magic_file) {
             unsigned char magic[4] = {0};
-            fread(magic, 1, 4, magic_file);
+            size_t magic_read = fread(magic, 1, 4, magic_file);
             fclose(magic_file);
-            if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F') {
+            if (magic_read < 4) {
+                result = ARK_LINK_ERR_FORMAT;
+            } else if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F') {
                 result = ark_link_load_elf(path, &unit);
             } else {
                 result = ark_link_load_coff(path, &unit);
