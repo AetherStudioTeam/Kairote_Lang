@@ -3062,6 +3062,9 @@ static int type_check_add_class_member(TypeCheckContext* context, ClassInfo* cla
             KrtTokenType* param_types = member->type == AST_FUNCTION_DECLARATION
                 ? member->data.function_decl.parameter_types
                 : member->data.static_function_decl.parameter_types;
+            int* param_is_array = member->type == AST_FUNCTION_DECLARATION
+                ? member->data.function_decl.parameter_is_array
+                : member->data.static_function_decl.parameter_is_array;
 
             for (int i = 0; i < param_count; i++) {
                 Type* param_type = NULL;
@@ -3079,6 +3082,11 @@ static int type_check_add_class_member(TypeCheckContext* context, ClassInfo* cla
                     case TOKEN_BOOL: param_type = type_create_basic(TYPE_BOOL); break;
                     case TOKEN_STRING: param_type = type_create_basic(TYPE_STRING); break;
                     default: param_type = type_create_basic(TYPE_UNKNOWN); break;
+                }
+                if (param_type && param_is_array && param_is_array[i]) {
+                    Type* array_type = type_create_array(param_type, 0);
+                    type_destroy(param_type);
+                    param_type = array_type;
                 }
                 type_function_add_parameter(method_type, param_type);
             }

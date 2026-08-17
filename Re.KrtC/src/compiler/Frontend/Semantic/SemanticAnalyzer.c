@@ -946,10 +946,99 @@ bool semantic_analyzer_analyze_function_call(SemanticAnalyzer* analyzer, ASTNode
     }
 
     char* func_name = NULL;
+
+    if (!call_expr->data.call.object) {
+        const char* current_class = semantic_analyzer_get_current_class_context(analyzer);
+        if (current_class) {
+            for (int i = 0; i < call_expr->data.call.argument_count; i++) {
+                if (!semantic_analyzer_analyze_expression(analyzer, call_expr->data.call.arguments[i])) {
+                    return false;
+                }
+            }
+
+            KrtTokenType* arg_types = NULL;
+            if (call_expr->data.call.argument_count > 0) {
+                arg_types = (KrtTokenType*)KRT_MALLOC(
+                    sizeof(KrtTokenType) * call_expr->data.call.argument_count);
+                if (!arg_types) {
+                    semantic_analyzer_add_error(analyzer, "Memory allocation failed");
+                    return false;
+                }
+                for (int i = 0; i < call_expr->data.call.argument_count; i++) {
+                    arg_types[i] = semantic_analyzer_infer_expression_type(
+                        analyzer, call_expr->data.call.arguments[i]);
+                }
+            }
+
+            const char* ns_path[2] = { current_class, NULL };
+            char* mangled_name = name_mangle_function(ns_path, call_expr->data.call.name,
+                                                       arg_types,
+                                                       call_expr->data.call.argument_count);
+            KRT_FREE(arg_types);
+            if (!mangled_name) {
+                semantic_analyzer_add_error(analyzer, "Failed to mangle method %s",
+                                            call_expr->data.call.name);
+                return false;
+            }
+
+            /* Methods in the same class may be declared later. Keep the
+               signature-resolved reference and let normal linking diagnose a
+               truly missing implementation. */
+            KRT_FREE(call_expr->data.call.resolved_mangled_name);
+            call_expr->data.call.resolved_mangled_name = mangled_name;
+            return true;
+        }
+    }
     
     if (call_expr->data.call.object && call_expr->data.call.object->type == AST_IDENTIFIER) {
         const char* class_name = call_expr->data.call.object->data.identifier_name;
         const char* method_name = call_expr->data.call.name;
+
+        /* Class methods are overloaded, so resolve the exact signature before
+           falling back to the legacy Class__Method spelling. */
+        SymbolEntry* class_symbol = semantic_analyzer_lookup_class(analyzer, class_name);
+        if (class_symbol && class_symbol->nested_table) {
+            for (int i = 0; i < call_expr->data.call.argument_count; i++) {
+                if (!semantic_analyzer_analyze_expression(analyzer, call_expr->data.call.arguments[i])) {
+                    return false;
+                }
+            }
+
+            KrtTokenType* arg_types = NULL;
+            if (call_expr->data.call.argument_count > 0) {
+                arg_types = (KrtTokenType*)KRT_MALLOC(
+                    sizeof(KrtTokenType) * call_expr->data.call.argument_count);
+                if (!arg_types) {
+                    semantic_analyzer_add_error(analyzer, "Memory allocation failed");
+                    return false;
+                }
+                for (int i = 0; i < call_expr->data.call.argument_count; i++) {
+                    arg_types[i] = semantic_analyzer_infer_expression_type(
+                        analyzer, call_expr->data.call.arguments[i]);
+                }
+            }
+
+            const char* ns_path[2] = { class_name, NULL };
+            char* mangled_name = name_mangle_function(ns_path, method_name, arg_types,
+                                                       call_expr->data.call.argument_count);
+            KRT_FREE(arg_types);
+
+            SymbolEntry* method_symbol = mangled_name
+                ? symbol_table_lookup(class_symbol->nested_table, mangled_name)
+                : NULL;
+            if (!method_symbol || method_symbol->type != SYMBOL_FUNCTION) {
+                semantic_analyzer_add_error_at(analyzer, call_expr,
+                    "Undefined static method: %s::%s", class_name, method_name);
+                KRT_FREE(mangled_name);
+                return false;
+            }
+
+            KRT_FREE(call_expr->data.call.resolved_class_name);
+            KRT_FREE(call_expr->data.call.resolved_mangled_name);
+            call_expr->data.call.resolved_class_name = KRT_STRDUP(class_name);
+            call_expr->data.call.resolved_mangled_name = mangled_name;
+            return true;
+        }
         
         if (strstr(method_name, "__") != NULL) {
             
@@ -1587,23 +1676,41 @@ bool semantic_analyzer_analyze_statement(SemanticAnalyzer* analyzer, ASTNode* st
 
         case AST_FUNCTION_DECLARATION: {
             const char* func_name = stmt->data.function_decl.name;
+            const char* current_class = semantic_analyzer_get_current_class_context(analyzer);
+            char* mangled_name = NULL;
+            const char* symbol_name = func_name;
 
-            SymbolEntry* existing = symbol_table_lookup_current_scope(analyzer->symbol_table, func_name);
+            if (current_class) {
+                const char* ns_path[2] = { current_class, NULL };
+                mangled_name = name_mangle_function(ns_path, func_name,
+                                                    stmt->data.function_decl.parameter_types,
+                                                    stmt->data.function_decl.parameter_count);
+                if (!mangled_name) {
+                    semantic_analyzer_add_error_at(analyzer, stmt,
+                        "Failed to mangle method %s", func_name);
+                    return false;
+                }
+                symbol_name = mangled_name;
+            }
+
+            SymbolEntry* existing = symbol_table_lookup_current_scope(analyzer->symbol_table, symbol_name);
             if (existing && existing->state == SYMBOL_DEFINED) {
                 semantic_analyzer_add_error_at(analyzer, stmt, 
                     "Function %s already defined", func_name);
+                KRT_FREE(mangled_name);
                 return false;
             }
 
-            SymbolEntry* func_sym = symbol_table_define(analyzer->symbol_table, func_name, SYMBOL_FUNCTION, 0, NULL);
+            SymbolEntry* func_sym = symbol_table_define(analyzer->symbol_table, symbol_name, SYMBOL_FUNCTION, 0, NULL);
             if (!func_sym) {
                 semantic_analyzer_add_error_at(analyzer, stmt, 
                     "Failed to define function %s", func_name);
+                KRT_FREE(mangled_name);
                 return false;
             }
             func_sym->state = SYMBOL_DEFINED;
 
-            if (strcmp(func_name, "main") == 0) {
+            if (!current_class && strcmp(func_name, "main") == 0) {
                 analyzer->has_entry_point = true;
                 if (analyzer->entry_point_name) KRT_FREE(analyzer->entry_point_name);
                 analyzer->entry_point_name = KRT_STRDUP(func_name);
@@ -1616,12 +1723,16 @@ bool semantic_analyzer_analyze_statement(SemanticAnalyzer* analyzer, ASTNode* st
                     SymbolEntry* param = symbol_table_define(analyzer->symbol_table, stmt->data.function_decl.parameters[i], SYMBOL_VARIABLE, 0, NULL);
                     if (param) {
                         param->value_type = stmt->data.function_decl.parameter_types[i];
+                        param->is_array = stmt->data.function_decl.parameter_is_array &&
+                                          stmt->data.function_decl.parameter_is_array[i];
                     }
                 }
                 bool body_ok = semantic_analyzer_analyze_statement(analyzer, stmt->data.function_decl.body);
                 symbol_table_pop_scope(analyzer->symbol_table);
+                KRT_FREE(mangled_name);
                 return body_ok;
             }
+            KRT_FREE(mangled_name);
             return true;
         }
 
@@ -1671,6 +1782,8 @@ bool semantic_analyzer_analyze_statement(SemanticAnalyzer* analyzer, ASTNode* st
                 SymbolEntry* param = symbol_table_define(analyzer->symbol_table, param_name, SYMBOL_VARIABLE, 0, NULL);
                 if (param) {
                     param->value_type = stmt->data.static_function_decl.parameter_types[i];
+                    param->is_array = stmt->data.static_function_decl.parameter_is_array &&
+                                      stmt->data.static_function_decl.parameter_is_array[i];
                 }
             }
             

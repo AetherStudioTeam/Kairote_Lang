@@ -1033,7 +1033,7 @@ static const char* ir_opcode_names[] = {
     "lt", "gt", "eq", "le", "ge", "ne",
     "jump", "branch", "call", "return", "label",
     "strcat", "cast", "loadptr", "storeptr", "array_store",
-    "int_to_string", "double_to_string", "copy", "phi", "nop"
+    "int_to_string", "double_to_string", "copy", "syscall", "phi", "nop"
 };
 
 static void print_value(FILE* out, KrtIRValue* val) {

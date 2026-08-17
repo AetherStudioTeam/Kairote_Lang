@@ -38,6 +38,11 @@ static void KrtIrPushNamespaceContext(KrtIRBuilder* builder, const char* namespa
 static void KrtIrPopNamespaceContext(KrtIRBuilder* builder);
 static const char** KrtIrGetNamespacePath(KrtIRBuilder* builder, int* out_count);
 
+static int irgen_is_syscall_method(const char* class_name, const char* method_name) {
+    return class_name && method_name &&
+           strcmp(class_name, "Sys") == 0 && strcmp(method_name, "syscall") == 0;
+}
+
 typedef struct {
     char** type_args;
     int type_arg_count;
@@ -874,9 +879,6 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 if (expr->data.call.object->type == AST_IDENTIFIER) {
                     const char* class_name = expr->data.call.object->data.identifier_name;
 
-                    char mangled[256];
-                    snprintf(mangled, sizeof(mangled), "%s__%s", class_name, func_name);
-
                     KrtIRValue* args = NULL;
                     if (expr->data.call.argument_count > 0) {
                         args = IRGEN_ALLOC_ARGS(expr->data.call.argument_count);
@@ -886,29 +888,29 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                         }
                     }
 
-                    fprintf(stderr, "[IrGen] Static call: %s -> %s\n", func_name, mangled);
-                    KrtIRValue result = KrtIrCall(builder, mangled, args, expr->data.call.argument_count);
-                    IRGEN_SAFE_FREE(args);
-                    return result;
-                }
-                else if (expr->data.call.object->type == AST_MEMBER_ACCESS) {
-                    ASTNode* member_access = expr->data.call.object;
-                    if (member_access->data.member_access.object && 
-                        member_access->data.member_access.object->type == AST_IDENTIFIER) {
-                        const char* class_name = member_access->data.member_access.object->data.identifier_name;
-                        const char* method_name = member_access->data.member_access.member_name;
-                        
-                        if (strcmp(class_name, "Console") == 0 && strcmp(method_name, "WriteLine") == 0) {
-                            if (expr->data.call.argument_count == 1) {
-                                KrtIRValue* args = IRGEN_ALLOC_ARGS(1);
-                                IRGEN_CHECK_ALLOC(args, void_val_return());
-                                IRGEN_SET_ARG(args, 0, KrtIrGenerateExpression(builder, expr->data.call.arguments[0]));
-                                KrtIRValue result = KrtIrCall(builder, "Console__WriteLine", args, 1);
-                                IRGEN_SAFE_FREE(args);
-                                return result;
-                            }
-                        }
+                    char* fallback_mangled = NULL;
+                    const char* call_func_name = expr->data.call.resolved_mangled_name;
+                    if (!call_func_name) {
+                        const char* ns_path[2] = { class_name, NULL };
+                        fallback_mangled = KrtIrMangleCallFunctionName(
+                            ns_path, func_name, expr->data.call.arguments,
+                            expr->data.call.argument_count);
+                        call_func_name = fallback_mangled ? fallback_mangled : func_name;
                     }
+
+                    fprintf(stderr, "[IrGen] Static call: %s -> %s\n", func_name, call_func_name);
+                    KrtIRValue result;
+                    if (irgen_is_syscall_method(class_name, func_name) &&
+                        expr->data.call.argument_count > 0) {
+                        result = KrtIrSyscall(builder, args[0], args + 1,
+                                              expr->data.call.argument_count - 1);
+                    } else {
+                        result = KrtIrCall(builder, call_func_name, args,
+                                           expr->data.call.argument_count);
+                    }
+                    IRGEN_SAFE_FREE(args);
+                    IRGEN_SAFE_FREE(fallback_mangled);
+                    return result;
                 }
             }
 
@@ -926,22 +928,20 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
             }
 
             char* call_mangled = NULL;
-            const char* call_func_name = func_name;
-
-            KrtTokenType* param_types = NULL;
-            int arg_count = expr->data.call.argument_count;
-            if (arg_count > 0) {
-                param_types = (KrtTokenType*)KRT_MALLOC(arg_count * sizeof(KrtTokenType));
-                if (param_types) {
-                    KrtIrFillParamTypesForMangle(expr->data.call.arguments, arg_count, param_types);
+            const char* call_func_name = expr->data.call.resolved_mangled_name;
+            if (!call_func_name) {
+                KrtTokenType* param_types = NULL;
+                int arg_count = expr->data.call.argument_count;
+                if (arg_count > 0) {
+                    param_types = (KrtTokenType*)KRT_MALLOC(arg_count * sizeof(KrtTokenType));
+                    if (param_types) {
+                        KrtIrFillParamTypesForMangle(expr->data.call.arguments, arg_count, param_types);
+                    }
                 }
-            }
 
-            call_mangled = name_mangle_function(NULL, func_name, param_types, arg_count);
-            if (param_types) KRT_FREE(param_types);
-
-            if (call_mangled) {
-                call_func_name = call_mangled;
+                call_mangled = name_mangle_function(NULL, func_name, param_types, arg_count);
+                if (param_types) KRT_FREE(param_types);
+                call_func_name = call_mangled ? call_mangled : func_name;
             }
 
             KrtIRValue* args = NULL;
@@ -953,7 +953,14 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 }
             }
             
-            KrtIRValue result = KrtIrCall(builder, call_func_name, args, expr->data.call.argument_count);
+            KrtIRValue result;
+            if (strcmp(func_name, "syscall") == 0 &&
+                expr->data.call.argument_count > 0) {
+                result = KrtIrSyscall(builder, args[0], args + 1,
+                                      expr->data.call.argument_count - 1);
+            } else {
+                result = KrtIrCall(builder, call_func_name, args, expr->data.call.argument_count);
+            }
             IRGEN_SAFE_FREE(args);
             IRGEN_SAFE_FREE(call_mangled);
             return result;
@@ -965,8 +972,15 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
 
             fprintf(stderr, "[IrGen] AST_STATIC_METHOD_CALL expr: %s.%s\n", class_name, method_name);
 
-            char* mangled = KrtIrMangleClassMethodName(class_name, method_name, NULL, 0);
-            const char* call_func_name = mangled ? mangled : method_name;
+            char* mangled = NULL;
+            const char* call_func_name = expr->data.static_call.resolved_mangled_name;
+            if (!call_func_name) {
+                const char* ns_path[2] = { class_name, NULL };
+                mangled = KrtIrMangleCallFunctionName(ns_path, method_name,
+                                                      expr->data.static_call.arguments,
+                                                      expr->data.static_call.argument_count);
+                call_func_name = mangled ? mangled : method_name;
+            }
 
             KrtIRValue* args = NULL;
             if (expr->data.static_call.argument_count > 0) {
@@ -977,7 +991,15 @@ static KrtIRValue KrtIrGenerateExpression(KrtIRBuilder* builder, ASTNode* expr) 
                 }
             }
 
-            KrtIRValue result = KrtIrCall(builder, call_func_name, args, expr->data.static_call.argument_count);
+            KrtIRValue result;
+            if (irgen_is_syscall_method(class_name, method_name) &&
+                expr->data.static_call.argument_count > 0) {
+                result = KrtIrSyscall(builder, args[0], args + 1,
+                                      expr->data.static_call.argument_count - 1);
+            } else {
+                result = KrtIrCall(builder, call_func_name, args,
+                                   expr->data.static_call.argument_count);
+            }
             IRGEN_SAFE_FREE(args);
             IRGEN_SAFE_FREE(mangled);
             return result;

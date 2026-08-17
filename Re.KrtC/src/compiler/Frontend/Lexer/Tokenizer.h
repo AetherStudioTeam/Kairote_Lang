@@ -147,6 +147,8 @@ typedef enum {
 
     TOKEN_IS,
     TOKEN_AS,
+    TOKEN_CONST,
+    TOKEN_EXTERN,
     TOKEN_YIELD,
     TOKEN_LOCK,
     TOKEN_MATCH,
