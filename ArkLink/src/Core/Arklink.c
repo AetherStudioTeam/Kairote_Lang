@@ -1,6 +1,6 @@
-#include "ArkLink/arklink.h"
-#include "ArkLink/loader.h"
-#include "ArkLink/linker_native.h"
+#include "ArkLink/Arklink.h"
+#include "ArkLink/Loader.h"
+#include "ArkLink/LinkerNative.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

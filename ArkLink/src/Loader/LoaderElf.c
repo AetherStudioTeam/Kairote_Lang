@@ -1,4 +1,4 @@
-#include "ArkLink/loader.h"
+#include "ArkLink/Loader.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,8 +179,8 @@ static ArkSectionKind elf_section_kind(const char* name, uint32_t sh_flags) {
 
 static uint32_t elf_section_flags(uint32_t sh_flags, ArkSectionKind kind) {
     uint32_t flags = 0;
-    if (sh_flags & 0x1) flags |= ARK_SECTION_EXEC; /* SHF_EXECINSTR */
-    if (sh_flags & 0x2) flags |= ARK_SECTION_WRITE; /* SHF_WRITE */
+    if (sh_flags & 0x1) flags |= ARK_SECTION_EXEC;
+    if (sh_flags & 0x2) flags |= ARK_SECTION_WRITE;
     flags |= ARK_SECTION_READ;
     if (kind == ARK_SECTION_CODE && !(flags & ARK_SECTION_EXEC)) flags |= ARK_SECTION_EXEC;
     if (kind == ARK_SECTION_DATA) flags |= ARK_SECTION_WRITE;
@@ -248,13 +248,18 @@ ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit) {
         return ARK_LINK_ERR_UNSUPPORTED;
     }
 
+    if (ehdr->e_ident[4] != ELFCLASS64 || ehdr->e_ident[5] != ELFDATA2LSB) {
+        elf_context_destroy(ctx);
+        return ARK_LINK_ERR_FORMAT;
+    }
+
     ArkLinkUnit* new_unit = ark_link_unit_create(path);
     if (!new_unit) {
         elf_context_destroy(ctx);
         return ARK_LINK_ERR_MEMORY;
     }
 
-    /* Map ELF sections to local section indices and create ArkLink sections. */
+
     for (int i = 0; i < ehdr->e_shnum; i++) {
         Elf64_Shdr_Loader* sh = &ctx->shdrs[i];
         const char* name = elf_section_name(ctx, sh->sh_name);
@@ -295,7 +300,7 @@ ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit) {
         }
     }
 
-    /* Find symbol table and string table. */
+
     Elf64_Sym_Loader* symtab = NULL;
     size_t sym_count = 0;
     const char* strtab = NULL;
@@ -318,8 +323,7 @@ ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit) {
         }
     }
 
-    /* Add all symbols except the ELF NULL symbol at index 0.  ELF relocation
-       indices are 1-based in the symbol table, so we subtract 1 from them. */
+
     if (symtab) {
         for (size_t i = 1; i < sym_count; i++) {
             Elf64_Sym_Loader* sym = &symtab[i];
@@ -341,14 +345,12 @@ ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit) {
             }
 
             if (!sym_name && type == STT_FILE) {
-                /* File symbols are not resolvable; give them a unique name. */
                 char file_sym[64];
                 snprintf(file_sym, sizeof(file_sym), ".file.%zu", i);
                 desc.name = strdup(file_sym);
             } else if (sym_name) {
                 desc.name = strdup(sym_name);
             } else {
-                /* Anonymous symbol, must have a name for the resolver. */
                 char anon_name[64];
                 snprintf(anon_name, sizeof(anon_name), ".anon.%zu", i);
                 desc.name = strdup(anon_name);
@@ -359,13 +361,10 @@ ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit) {
 
             if (shndx == SHN_UNDEF) {
                 desc.section_index = 0;
-            } else if (shndx == SHN_ABS) {
-                /* Treat absolute symbols as value-only; they won't resolve through sections. */
-                desc.section_index = 0;
             } else if (shndx < (uint16_t)ehdr->e_shnum) {
                 uint32_t local = ctx->elf_sec_to_local[shndx];
                 if (local != (uint32_t)-1) {
-                    desc.section_index = local + 1; /* 1-based in ArkLink */
+                    desc.section_index = local + 1;
                 } else {
                     desc.section_index = 0;
                 }
@@ -386,7 +385,7 @@ ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit) {
         }
     }
 
-    /* Process .rela.* sections. */
+
     for (int i = 0; i < ehdr->e_shnum; i++) {
         Elf64_Shdr_Loader* sh = &ctx->shdrs[i];
         if (sh->sh_type != SHT_RELA) continue;
@@ -433,7 +432,7 @@ ArkLinkResult ark_link_load_elf(const char* path, ArkLinkUnit** unit) {
 
     elf_context_destroy(ctx);
 
-    /* Keep the raw file around so that symbol names (strdup'd) remain valid. */
+
     new_unit->file_size = 0;
     *unit = new_unit;
     return ARK_LINK_OK;

@@ -1,0 +1,97 @@
+using System.Runtime;
+using System.Memory;
+using System.String;
+using System.Convert;
+using System.Math;
+using System.StringBuilder;
+
+namespace System;
+
+public static class Console
+{
+    public const int32 STDOUT = 1;
+    public const int32 STDERR = 2;
+    public const int32 STDIN = 0;
+
+    private static int32 WriteRaw(int32 fd, int64 data, int32 length)
+    {
+        return (int32)Sys.syscall(1, (int64)fd, data, (int64)length, 0, 0, 0);
+    }
+
+    public static void Write(string value)
+    {
+        if (value == null) return;
+        int64 len = Sys.InternalStringLength(value);
+        int64 ptr = Sys.InternalStringPtr(value);
+        WriteRaw(STDOUT, ptr, (int32)len);
+    }
+
+    public static void WriteLine(string value)
+    {
+        Write(value);
+        WriteLine();
+    }
+
+    public static void WriteLine()
+    {
+        WriteRaw(STDOUT, (int64)"\n", 1);
+    }
+
+    public static void Write(int32 value)
+    {
+        string s = Sys.InternalInt32ToString(value);
+        Write(s);
+    }
+
+    public static void WriteLine(int32 value)
+    {
+        Write(value);
+        WriteLine();
+    }
+
+    public static void Write(bool value)
+    {
+        if (value)
+        {
+            Write("True");
+        }
+        else
+        {
+            Write("False");
+        }
+    }
+
+    public static void WriteLine(bool value)
+    {
+        Write(value);
+        WriteLine();
+    }
+
+    public static void WriteFormat(string format, string arg0)
+    {
+        int32 i = 0;
+        int64 len = Sys.InternalStringLength(format);
+        int64 ptr = Sys.InternalStringPtr(format);
+        char[] arr = (char[])ptr;
+
+        while (i < (int32)len)
+        {
+            if (i + 2 < (int32)len && arr[i] == '{' && arr[i + 1] == '0' && arr[i + 2] == '}')
+            {
+                Write(arg0);
+                i = i + 3;
+            }
+            else
+            {
+                WriteRaw(STDOUT, (int64)(ptr + (int64)i), 1);
+                i = i + 1;
+            }
+        }
+    }
+
+    public static void WriteLineFormat(string format, string arg0)
+    {
+        WriteFormat(format, arg0);
+        WriteLine();
+    }
+}
